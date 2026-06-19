@@ -8,6 +8,7 @@ build/
 logs/
 config/profiles.json
 config/settings.json
+config/restore_history.json
 *.sql
 *.gz
 .env
