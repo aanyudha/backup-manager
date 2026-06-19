@@ -10,6 +10,7 @@ config/profiles.json
 config/settings.json
 config/restore_history.json
 config/backup_metadata.json
+config/scheduler_state.json
 *.sql
 *.sql.gz
 *.gz

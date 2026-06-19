@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from app.models.profile import MySQLBackupProfile, utc_now
 from app.services.mysql_service import MySQLService
+from app.ui.schedule_fields_widget import ScheduleFieldsSection
 
 
 class MySQLProfilesPage(QWidget):
@@ -71,6 +72,7 @@ class MySQLProfilesPage(QWidget):
         self.retention_days_spin.setRange(0, 36500)
         self.retention_days_spin.setValue(0)
         self.retention_days_spin.setEnabled(False)
+        self.schedule_fields = ScheduleFieldsSection()
 
         form.addRow("Profile Name", self.name_edit)
         form.addRow("Host", self.host_edit)
@@ -85,6 +87,7 @@ class MySQLProfilesPage(QWidget):
         form.addRow("", self.compress_checkbox)
         form.addRow("", self.retention_checkbox)
         form.addRow("Retention Days", self.retention_days_spin)
+        self.schedule_fields.add_to_form(form)
 
         button_grid = QGridLayout()
         self.test_button = QPushButton("Test Connection")
@@ -169,6 +172,7 @@ class MySQLProfilesPage(QWidget):
         self.retention_checkbox.setChecked(False)
         self.retention_days_spin.setValue(0)
         self.retention_days_spin.setEnabled(False)
+        self.schedule_fields.clear()
         self.profile_list.clearSelection()
 
     def _load_selected_profile(self, current: QListWidgetItem | None) -> None:
@@ -193,6 +197,7 @@ class MySQLProfilesPage(QWidget):
         self.retention_checkbox.setChecked(profile.retention_enabled)
         self.retention_days_spin.setValue(profile.retention_days or 0)
         self.retention_days_spin.setEnabled(profile.retention_enabled)
+        self.schedule_fields.load_profile(profile)
         self._set_database_items(profile.databases, selected=profile.databases)
 
     def _set_database_items(self, items: list[str], selected: list[str] | None = None) -> None:
@@ -230,6 +235,7 @@ class MySQLProfilesPage(QWidget):
             last_status=last_status,
             last_message=last_message,
         )
+        self.schedule_fields.apply_to_payload(payload)
         if existing:
             payload["id"] = existing.id
         return MySQLBackupProfile(**payload)

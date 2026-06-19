@@ -10,6 +10,7 @@ from app.models.profile import (
 )
 from app.models.restore_result import RestoreResult
 from app.models.result import BackupResult
+from app.models.schedule import ScheduleFields, ScheduleType
 from app.models.settings import AppSettings
 
 __all__ = [
@@ -21,5 +22,7 @@ __all__ = [
     "MySQLBackupProfile",
     "Profile",
     "RestoreResult",
+    "ScheduleFields",
+    "ScheduleType",
     "parse_profile",
 ]

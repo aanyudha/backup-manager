@@ -12,7 +12,9 @@ Heisenberg Backup Manager is an open-source desktop application for creating reu
 - Folder restore support with overwrite-existing behavior
 - Local copy, `robocopy`, `rsync`, and SFTP transport support
 - Background backup execution with UI-safe worker threads
+- Internal scheduler for daily, weekly, and monthly backup runs
 - Profile-level logs and daily application logs
+- Scheduler state tracking for missed-run handling
 - Restore history with per-run and daily restore logs
 - Test coverage for core repository, platform, and transport behavior
 
@@ -53,7 +55,8 @@ python app.py
 - Runtime settings live in `config/settings.json`.
 - Backup profiles live in `config/profiles.json`.
 - Backup verification metadata lives in `config/backup_metadata.json`.
-- Safe starter examples are provided in `config/settings.example.json`, `config/profiles.example.json`, and `config/backup_metadata.example.json`.
+- Scheduler runtime state lives in `config/scheduler_state.json`.
+- Safe starter examples are provided in `config/settings.example.json`, `config/profiles.example.json`, `config/backup_metadata.example.json`, and `config/scheduler_state.example.json`.
 - Do not commit real local config or credential-bearing profile files.
 
 ## Smoke Check
@@ -90,6 +93,34 @@ python -m pytest -q
 - Per-run restore logs: `logs/restore_YYYYMMDD_HHMMSS.log`
 - Restore history is stored in `config/restore_history.json`
 
+## Scheduler
+
+- The MVP scheduler is internal only and runs while the desktop app is open.
+- It does not use Windows Task Scheduler, cron, or systemd in `v0.3.0`.
+- Supported schedule types are `manual`, `daily`, `weekly`, and `monthly`.
+- `daily` uses a single `HH:MM` time.
+- `weekly` uses `HH:MM` plus one or more weekdays where `0=Monday` through `6=Sunday`.
+- `monthly` uses `HH:MM` plus a day-of-month value from `1` to `31`.
+- If a monthly schedule is set past the end of the month, it runs on that month's last day.
+- `Run if missed` lets the app catch up later the same day after the scheduled minute has passed.
+- Use the `Scheduler` tab to review schedule summaries, last run details, next run times, and current status.
+- Use `Settings` to enable `Auto-start scheduler when app opens`.
+
+## Scheduler Logs
+
+- Daily scheduler logs: `logs/scheduler_YYYYMMDD.log`
+- Scheduler runtime state: `config/scheduler_state.json`
+- Default shape:
+
+```json
+{
+  "last_runs": {}
+}
+```
+
+- The runtime file is ignored by git.
+- `config/scheduler_state.example.json` is the committed starter example.
+
 ## Backup Metadata File
 
 - File: `config/backup_metadata.json`
@@ -121,7 +152,7 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - `dist/` output is ignored by git.
 - `build/` and `*.spec` are ignored by git.
 - Local config files may be created during development or packaging checks.
-- Do not commit real `config/profiles.json`, `config/settings.json`, `config/restore_history.json`, or `config/backup_metadata.json` files.
+- Do not commit real `config/profiles.json`, `config/settings.json`, `config/restore_history.json`, `config/backup_metadata.json`, or `config/scheduler_state.json` files.
 
 ## Windows Notes
 

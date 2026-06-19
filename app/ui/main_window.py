@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -19,14 +21,17 @@ from app.services.log_service import LogService
 from app.services.mysql_service import MySQLService
 from app.services.platform_service import PlatformService
 from app.services.restore_service import RestoreService
+from app.services.scheduler_service import SchedulerService
 from app.ui.dashboard_page import DashboardPage
 from app.ui.folder_profiles_page import FolderProfilesPage
 from app.ui.logs_page import LogsPage
 from app.ui.mysql_profiles_page import MySQLProfilesPage
 from app.ui.restore_page import RestorePage
+from app.ui.scheduler_page import SchedulerPage
 from app.ui.settings_page import SettingsPage
 from app.workers.backup_worker import BackupWorker
 from app.workers.restore_worker import RestoreWorker
+from app.workers.scheduler_worker import SchedulerWorker
 
 
 class MainWindow(QMainWindow):
@@ -38,6 +43,7 @@ class MainWindow(QMainWindow):
         repository: ProfileRepository,
         backup_service: BackupService,
         restore_service: RestoreService,
+        scheduler_service: SchedulerService,
         mysql_service: MySQLService,
         platform_service: PlatformService,
         log_service: LogService,
@@ -46,11 +52,15 @@ class MainWindow(QMainWindow):
         self.repository = repository
         self.backup_service = backup_service
         self.restore_service = restore_service
+        self.scheduler_service = scheduler_service
         self.mysql_service = mysql_service
         self.platform_service = platform_service
         self.log_service = log_service
         self.worker_thread: QThread | None = None
         self.worker: object | None = None
+        self.scheduler_thread: QThread | None = None
+        self.scheduler_worker: SchedulerWorker | None = None
+        self._scheduler_continuous = False
 
         self.setWindowTitle("Heisenberg Backup Manager")
         self.resize(1200, 800)
@@ -60,6 +70,7 @@ class MainWindow(QMainWindow):
         self.mysql_profiles_page = MySQLProfilesPage(mysql_service)
         self.folder_profiles_page = FolderProfilesPage(platform_service)
         self.restore_page = RestorePage()
+        self.scheduler_page = SchedulerPage()
         self.logs_page = LogsPage(log_service.logs_dir)
         self.settings_page = SettingsPage()
 
@@ -67,6 +78,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.mysql_profiles_page, "MySQL Profiles")
         self.tabs.addTab(self.folder_profiles_page, "Folder Profiles")
         self.tabs.addTab(self.restore_page, "Restore")
+        self.tabs.addTab(self.scheduler_page, "Scheduler")
         self.tabs.addTab(self.logs_page, "Logs")
         self.tabs.addTab(self.settings_page, "Settings")
         self.setCentralWidget(self.tabs)
@@ -84,9 +96,15 @@ class MainWindow(QMainWindow):
         self.restore_page.mysql_restore_requested.connect(self.run_mysql_restore)
         self.restore_page.folder_validate_requested.connect(self.validate_folder_restore)
         self.restore_page.folder_restore_requested.connect(self.run_folder_restore)
+        self.scheduler_page.refresh_requested.connect(self.refresh_all)
+        self.scheduler_page.run_due_requested.connect(self.run_due_now)
+        self.scheduler_page.start_requested.connect(self.start_scheduler)
+        self.scheduler_page.stop_requested.connect(self.stop_scheduler)
         self.settings_page.save_requested.connect(self.save_settings)
 
         self.refresh_all()
+        if self.settings_page.auto_start_scheduler_checkbox.isChecked():
+            self.start_scheduler()
 
     def refresh_all(self) -> None:
         """Reload profiles, settings, and log list from disk."""
@@ -102,6 +120,8 @@ class MainWindow(QMainWindow):
         self.settings_page.load_settings(settings)
         self.restore_page.load_settings(settings)
         self.restore_page.set_history(self.restore_service.list_history())
+        self.scheduler_page.set_rows(self._build_scheduler_rows(profiles))
+        self.scheduler_page.set_scheduler_running(self.scheduler_thread is not None and self._scheduler_continuous)
         self.logs_page.refresh()
 
     def save_profile(self, profile: Profile) -> None:
@@ -137,6 +157,8 @@ class MainWindow(QMainWindow):
         self.repository.save_settings(settings)
         self.settings_page.set_status("Settings saved.")
         self.dashboard_page.append_status("Settings updated.")
+        if settings.auto_start_scheduler:
+            self.scheduler_page.append_status("Auto-start scheduler is enabled for the next app launch.")
         self.restore_page.load_settings(settings)
 
     def run_profile(self, profile_id: str) -> None:
@@ -333,6 +355,94 @@ class MainWindow(QMainWindow):
         self.folder_profiles_page.set_running(running)
         self.restore_page.set_running(running)
 
+    def start_scheduler(self) -> None:
+        """Start the continuous internal scheduler."""
+        if self.scheduler_thread is not None:
+            QMessageBox.information(self, "Scheduler Running", "Wait for the current scheduler operation to finish.")
+            return
+        self._start_scheduler_worker(run_once=False)
+
+    def stop_scheduler(self) -> None:
+        """Request that the continuous scheduler stop."""
+        if self.scheduler_worker is None or not self._scheduler_continuous:
+            QMessageBox.information(self, "Scheduler", "Scheduler is not currently running.")
+            return
+        self.scheduler_page.append_status("Stopping scheduler...")
+        self.scheduler_worker.stop()
+
+    def run_due_now(self) -> None:
+        """Trigger an immediate due-profile check."""
+        if self.scheduler_worker is not None and self._scheduler_continuous:
+            self.scheduler_page.append_status("Immediate due check requested.")
+            self.dashboard_page.append_status("Immediate due check requested.")
+            self.scheduler_worker.request_run_due_now()
+            return
+        if self.scheduler_thread is not None:
+            QMessageBox.information(self, "Scheduler Busy", "Wait for the current due check to finish.")
+            return
+        self._start_scheduler_worker(run_once=True)
+
+    def _start_scheduler_worker(self, *, run_once: bool) -> None:
+        """Create and start the scheduler worker thread."""
+        self.scheduler_thread = QThread(self)
+        self.scheduler_worker = SchedulerWorker(
+            self.backup_service,
+            self.scheduler_service,
+            self.log_service,
+            run_once=run_once,
+        )
+        self._scheduler_continuous = not run_once
+        self.scheduler_worker.moveToThread(self.scheduler_thread)
+        self.scheduler_thread.started.connect(self.scheduler_worker.run)
+        self.scheduler_worker.progress.connect(self._handle_scheduler_progress)
+        self.scheduler_worker.profile_completed.connect(lambda _: self.refresh_all())
+        self.scheduler_worker.finished.connect(self.refresh_all)
+        self.scheduler_worker.finished.connect(self.scheduler_thread.quit)
+        self.scheduler_worker.failed.connect(self._handle_scheduler_failed)
+        self.scheduler_worker.failed.connect(self.scheduler_thread.quit)
+        self.scheduler_thread.finished.connect(self._cleanup_scheduler_worker)
+        self.scheduler_thread.start()
+        self.scheduler_page.set_scheduler_running(self._scheduler_continuous)
+
+    def _handle_scheduler_progress(self, message: str) -> None:
+        self.scheduler_page.append_status(message)
+        self.dashboard_page.append_status(message)
+        if "Scheduled backup finished" in message or "Skipped profile" in message:
+            self.logs_page.refresh()
+
+    def _handle_scheduler_failed(self, message: str) -> None:
+        self.scheduler_page.append_status(f"Scheduler failed: {message}")
+        self.dashboard_page.append_status(f"Scheduler failed: {message}")
+        QMessageBox.warning(self, "Scheduler Failed", message)
+
+    def _cleanup_scheduler_worker(self) -> None:
+        if self.scheduler_worker is not None:
+            self.scheduler_worker.deleteLater()
+        if self.scheduler_thread is not None:
+            self.scheduler_thread.deleteLater()
+        self.scheduler_worker = None
+        self.scheduler_thread = None
+        self._scheduler_continuous = False
+        self.scheduler_page.set_scheduler_running(False)
+
+    def _build_scheduler_rows(self, profiles: list[Profile]) -> list[dict[str, str]]:
+        now = datetime.now().astimezone()
+        rows: list[dict[str, str]] = []
+        for profile in sorted(profiles, key=lambda item: item.name.lower()):
+            next_run = self.scheduler_service.get_next_run(profile, now)
+            rows.append(
+                {
+                    "profile_name": profile.name,
+                    "type": profile.schedule_type,
+                    "schedule_enabled": "Yes" if profile.schedule_enabled else "No",
+                    "schedule_summary": self.scheduler_service.get_schedule_summary(profile),
+                    "last_run": self._format_datetime(profile.last_run_at),
+                    "next_run": self._format_datetime(next_run),
+                    "last_status": profile.last_status or "",
+                }
+            )
+        return rows
+
     def _confirm_mysql_restore(self, payload: dict[str, object]) -> bool:
         """Confirm the destructive MySQL restore action with the user."""
         answer = QMessageBox.question(
@@ -387,3 +497,9 @@ class MainWindow(QMainWindow):
             return None
         text = str(value).strip()
         return text or None
+
+    @staticmethod
+    def _format_datetime(value) -> str:
+        if not value:
+            return ""
+        return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")

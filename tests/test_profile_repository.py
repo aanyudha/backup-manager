@@ -31,6 +31,7 @@ def test_repository_creates_config_files(tmp_path: Path) -> None:
     assert repository.list_profiles() == []
     assert repository.list_restore_history() == []
     assert repository.load_settings().default_log_folder == "logs"
+    assert repository.load_settings().auto_start_scheduler is False
 
 
 def test_repository_create_update_delete(tmp_path: Path) -> None:

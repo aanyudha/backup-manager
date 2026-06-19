@@ -9,6 +9,7 @@ __all__ = [
     "MySQLService",
     "PlatformService",
     "RestoreService",
+    "SchedulerService",
     "RetentionService",
     "VerificationService",
 ]
@@ -40,6 +41,10 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from app.services.retention_service import RetentionService
 
         return RetentionService
+    if name == "SchedulerService":
+        from app.services.scheduler_service import SchedulerService
+
+        return SchedulerService
     if name == "RestoreService":
         from app.services.restore_service import RestoreService
 

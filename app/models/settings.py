@@ -11,4 +11,4 @@ class AppSettings(BaseModel):
     default_backup_folder: str = ""
     default_log_folder: str = "logs"
     default_mysqldump_path: str = ""
-
+    auto_start_scheduler: bool = False

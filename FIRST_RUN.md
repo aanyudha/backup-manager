@@ -43,9 +43,11 @@ python app.py
 4. Choose `all`, `single`, or `multiple` for database mode.
 5. Optionally enable `Compress SQL backup as .sql.gz` for streamed gzip output.
 6. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
-7. Use `Test Connection` to validate the credentials.
-8. Use `Load Database List` to fetch selectable databases.
-9. Click `Save Profile`.
+7. Optionally enable `Enable Schedule`, choose `manual`, `daily`, `weekly`, or `monthly`, and fill the matching schedule fields.
+8. Optionally leave `Run if missed` enabled so a missed daily, weekly, or monthly run still starts later that same day while the app is open.
+9. Use `Test Connection` to validate the credentials.
+10. Use `Load Database List` to fetch selectable databases.
+11. Click `Save Profile`.
 
 ## How To Create a Folder Profile
 
@@ -57,8 +59,9 @@ python app.py
    - `sync_without_delete`
    - `mirror_with_delete`
 5. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
-6. Fill SFTP fields only when using an SFTP-based profile.
-7. Click `Validate`, then `Save Profile`.
+6. Optionally enable `Enable Schedule`, choose the schedule type, and fill the matching time, weekday, or day-of-month fields.
+7. Fill SFTP fields only when using an SFTP-based profile.
+8. Click `Validate`, then `Save Profile`.
 
 ## How To Run a Backup
 
@@ -66,6 +69,28 @@ python app.py
 2. Go to `Dashboard`, `MySQL Profiles`, or `Folder Profiles`.
 3. Choose the profile and click `Run Selected` or `Run Backup`.
 4. Watch live output in the dashboard status panel.
+
+## How To Schedule a Backup
+
+1. Open either the `MySQL Profiles` or `Folder Profiles` tab.
+2. Edit or create a profile.
+3. Enable `Enable Schedule`.
+4. Choose one of these schedule types:
+   - `manual` keeps the profile out of automatic runs.
+   - `daily` uses the `Time` field.
+   - `weekly` uses `Time` plus one or more weekday checkboxes.
+   - `monthly` uses `Time` plus `Day of Month`.
+5. Leave `Run if missed` enabled if you want the app to catch up later that same day after the scheduled minute has passed.
+6. Save the profile.
+
+## How To Start and Stop the Scheduler
+
+1. Open the `Scheduler` tab.
+2. Use `Refresh` to reload last-run and next-run information.
+3. Use `Run Due Now` to perform an immediate due-profile check.
+4. Use `Start Scheduler` to begin the internal background loop.
+5. Use `Stop Scheduler` to end the background loop.
+6. If you want it to start automatically on launch, open `Settings` and enable `Auto-start scheduler when app opens`.
 
 ## How To Run a Restore
 
@@ -94,6 +119,7 @@ python app.py
 - Backup logs: `logs/{safe_profile_name}_{YYYYMMDD_HHMMSS}.log`
 - Daily restore logs: `logs/restore_YYYYMMDD.log`
 - Per-run restore logs: `logs/restore_YYYYMMDD_HHMMSS.log`
+- Daily scheduler logs: `logs/scheduler_YYYYMMDD.log`
 
 ## Where Backup Verification Is Stored
 
@@ -103,7 +129,9 @@ python app.py
 
 ## Known MVP Limitations
 
-- Scheduler is not active yet.
+- Scheduler only runs while the desktop app is open.
+- Scheduler does not integrate with Windows Task Scheduler yet.
+- Scheduler does not integrate with cron or systemd yet.
 - Cloud backup is not implemented yet.
 - Encryption is not implemented yet.
 - Passwords are stored in JSON for the MVP and must be protected.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFormLayout,
     QLabel,
     QLineEdit,
@@ -28,12 +29,14 @@ class SettingsPage(QWidget):
         self.default_backup_folder_edit = QLineEdit()
         self.default_log_folder_edit = QLineEdit()
         self.default_mysqldump_path_edit = QLineEdit()
+        self.auto_start_scheduler_checkbox = QCheckBox("Auto-start scheduler when app opens")
         self.status_label = QLabel()
         self.save_button = QPushButton("Save Settings")
 
         form.addRow("Default Backup Folder", self.default_backup_folder_edit)
         form.addRow("Default Log Folder", self.default_log_folder_edit)
         form.addRow("Default mysqldump Path", self.default_mysqldump_path_edit)
+        form.addRow("", self.auto_start_scheduler_checkbox)
 
         layout.addLayout(form)
         layout.addWidget(self.save_button)
@@ -47,6 +50,7 @@ class SettingsPage(QWidget):
         self.default_backup_folder_edit.setText(settings.default_backup_folder)
         self.default_log_folder_edit.setText(settings.default_log_folder)
         self.default_mysqldump_path_edit.setText(settings.default_mysqldump_path)
+        self.auto_start_scheduler_checkbox.setChecked(settings.auto_start_scheduler)
 
     def set_status(self, message: str) -> None:
         """Show a save result message."""
@@ -57,6 +61,6 @@ class SettingsPage(QWidget):
             default_backup_folder=self.default_backup_folder_edit.text(),
             default_log_folder=self.default_log_folder_edit.text(),
             default_mysqldump_path=self.default_mysqldump_path_edit.text(),
+            auto_start_scheduler=self.auto_start_scheduler_checkbox.isChecked(),
         )
         self.save_requested.emit(settings)
-

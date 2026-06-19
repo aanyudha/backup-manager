@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from app.models.profile import FolderBackupProfile, utc_now
 from app.services.platform_service import PlatformService
+from app.ui.schedule_fields_widget import ScheduleFieldsSection
 
 
 class FolderProfilesPage(QWidget):
@@ -76,6 +77,7 @@ class FolderProfilesPage(QWidget):
         self.retention_days_spin.setEnabled(False)
         self.warning_label = QLabel()
         self.warning_label.setWordWrap(True)
+        self.schedule_fields = ScheduleFieldsSection()
 
         form.addRow("Profile Name", self.name_edit)
         form.addRow("Source", self.source_edit)
@@ -93,6 +95,7 @@ class FolderProfilesPage(QWidget):
         form.addRow("", self.enabled_checkbox)
         form.addRow("", self.retention_checkbox)
         form.addRow("Retention Days", self.retention_days_spin)
+        self.schedule_fields.add_to_form(form)
         form.addRow("Compatibility", self.warning_label)
 
         button_grid = QGridLayout()
@@ -175,6 +178,7 @@ class FolderProfilesPage(QWidget):
         self.retention_checkbox.setChecked(False)
         self.retention_days_spin.setValue(0)
         self.retention_days_spin.setEnabled(False)
+        self.schedule_fields.clear()
         self.profile_list.clearSelection()
         self._refresh_warning()
 
@@ -204,6 +208,7 @@ class FolderProfilesPage(QWidget):
         self.retention_checkbox.setChecked(profile.retention_enabled)
         self.retention_days_spin.setValue(profile.retention_days or 0)
         self.retention_days_spin.setEnabled(profile.retention_enabled)
+        self.schedule_fields.load_profile(profile)
         self._refresh_warning()
 
     def _collect_form_data(self) -> FolderBackupProfile:
@@ -235,6 +240,7 @@ class FolderProfilesPage(QWidget):
             last_status=last_status,
             last_message=last_message,
         )
+        self.schedule_fields.apply_to_payload(payload)
         if existing:
             payload["id"] = existing.id
         return FolderBackupProfile(**payload)

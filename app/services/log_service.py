@@ -16,6 +16,7 @@ class LogService:
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.app_logger = self._build_daily_logger("app")
         self.restore_daily_logger = self._build_daily_logger("restore")
+        self.scheduler_daily_logger = self._build_daily_logger("scheduler")
 
     def _logger_name(self, prefix: str) -> str:
         """Build a path-specific logger name to avoid handler leakage across tests."""
@@ -90,6 +91,10 @@ class LogService:
     def log_app(self, message: str) -> None:
         """Write to the daily application log."""
         self.app_logger.info(message)
+
+    def log_scheduler(self, message: str) -> None:
+        """Write to the daily scheduler log."""
+        self.scheduler_daily_logger.info(message)
 
     def mask_secret(self, value: str | None) -> str:
         """Mask one secret for logs."""

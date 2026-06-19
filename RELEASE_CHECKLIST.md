@@ -4,9 +4,13 @@
 - [ ] Tests pass on Linux
 - [ ] Smoke check passes
 - [ ] UI smoke check passes
+- [ ] Scheduler due calculation tests pass
+- [ ] Scheduler worker smoke path verified
 - [ ] Compressed MySQL backup writes a `.sql.gz` artifact
 - [ ] Backup metadata includes SHA256 and file size
 - [ ] Retention only deletes metadata-tracked files
+- [ ] Manual backup still works
+- [ ] Scheduled backup does not duplicate in the same day
 - [ ] Windows PyInstaller build starts
 - [ ] Linux PyInstaller build starts
 - [ ] README reviewed
@@ -14,4 +18,4 @@
 - [ ] CHANGELOG updated
 - [ ] No real credentials in config
 - [ ] `git status` checked
-- [ ] Tag `v0.2.0` created only after verification
+- [ ] Tag `v0.3.0` created only after verification

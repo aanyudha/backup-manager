@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0] - Unreleased
+
+### Added
+
+- Internal backup scheduler
+- Daily, weekly, and monthly schedule support
+- Scheduler state tracking
+- Scheduler UI
+- Optional auto-start scheduler setting
+
+### Limitations
+
+- Scheduler only runs while the desktop app is open
+- Windows Task Scheduler and cron integration are planned for later
+
 ## [0.2.0] - Unreleased
 
 ### Added

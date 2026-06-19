@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 
 from app.engines.folder_backup_engine import FolderBackupEngine
 from app.engines.mysql_backup_engine import MySQLBackupEngine
@@ -43,33 +44,42 @@ class BackupService:
         self.retention_service = retention_service or RetentionService()
         self.mysql_engine = mysql_engine or MySQLBackupEngine(log_service)
         self.folder_engine = folder_engine or FolderBackupEngine(platform_service, log_service)
+        self._run_lock = Lock()
 
     def list_profiles(self) -> list[Profile]:
         """Return all persisted profiles."""
         return self.repository.list_profiles()
 
+    def is_running(self) -> bool:
+        """Return whether a backup run is currently active."""
+        return self._run_lock.locked()
+
     def run_profile(self, profile_id: str, progress: ProgressCallback | None = None) -> BackupResult:
         """Run a profile by id and persist the latest execution status."""
-        profile = self.repository.get_by_id(profile_id)
-        if not profile:
-            raise KeyError(f"Profile {profile_id} not found.")
+        if self._run_lock.locked() and progress:
+            progress("Waiting for another backup to finish.")
 
-        result = self._run(profile, progress)
-        warnings = self._post_process_result(profile, result, progress)
-        if warnings:
-            result.message = f"{result.message} {' '.join(warnings)}".strip()
-        refreshed = self.repository.get_by_id(profile_id)
-        if refreshed is None:
-            raise KeyError(f"Profile {profile_id} disappeared during execution.")
-        refreshed.last_run_at = result.finished_at.astimezone(timezone.utc)
-        refreshed.last_status = "success" if result.success else "failed"
-        refreshed.last_message = result.message
-        refreshed.updated_at = result.finished_at.astimezone(timezone.utc)
-        self.repository.update(refreshed)
-        self.log_service.log_app(
-            f"Profile '{profile.name}' finished with status={refreshed.last_status}: {result.message}"
-        )
-        return result
+        with self._run_lock:
+            profile = self.repository.get_by_id(profile_id)
+            if not profile:
+                raise KeyError(f"Profile {profile_id} not found.")
+
+            result = self._run(profile, progress)
+            warnings = self._post_process_result(profile, result, progress)
+            if warnings:
+                result.message = f"{result.message} {' '.join(warnings)}".strip()
+            refreshed = self.repository.get_by_id(profile_id)
+            if refreshed is None:
+                raise KeyError(f"Profile {profile_id} disappeared during execution.")
+            refreshed.last_run_at = result.finished_at.astimezone(timezone.utc)
+            refreshed.last_status = "success" if result.success else "failed"
+            refreshed.last_message = result.message
+            refreshed.updated_at = result.finished_at.astimezone(timezone.utc)
+            self.repository.update(refreshed)
+            self.log_service.log_app(
+                f"Profile '{profile.name}' finished with status={refreshed.last_status}: {result.message}"
+            )
+            return result
 
     def _run(self, profile: Profile, progress: ProgressCallback | None = None) -> BackupResult:
         """Dispatch a profile to the correct engine."""

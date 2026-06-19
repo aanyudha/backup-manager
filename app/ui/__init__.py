@@ -2,5 +2,6 @@
 
 from app.ui.main_window import MainWindow
 from app.ui.restore_page import RestorePage
+from app.ui.scheduler_page import SchedulerPage
 
-__all__ = ["MainWindow", "RestorePage"]
+__all__ = ["MainWindow", "RestorePage", "SchedulerPage"]

@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from typing import Literal, TypeAlias
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
+
+from app.models.schedule import ScheduleFields
 
 
 def utc_now() -> datetime:
@@ -14,7 +16,7 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class BaseProfile(BaseModel):
+class BaseProfile(ScheduleFields):
     """Common profile fields shared across all backup types."""
 
     id: str = Field(default_factory=lambda: str(uuid4()))

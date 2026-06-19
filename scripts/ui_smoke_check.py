@@ -17,12 +17,14 @@ if str(ROOT_DIR) not in sys.path:
 from PySide6.QtWidgets import QApplication
 
 from app.repositories.profile_repository import ProfileRepository
+from app.repositories.scheduler_state_repository import SchedulerStateRepository
 from app.services.backup_service import BackupService
 from app.services.log_service import LogService
 from app.services.mysql_service import MySQLService
 from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
 from app.services.restore_service import RestoreService
+from app.services.scheduler_service import SchedulerService
 from app.ui.main_window import MainWindow
 
 
@@ -35,12 +37,14 @@ def main() -> int:
     mysql_service = MySQLService()
     backup_service = BackupService(repository, platform_service, log_service)
     restore_service = RestoreService(repository, mysql_service, log_service)
+    scheduler_service = SchedulerService(SchedulerStateRepository(path_service.config_dir()))
 
     app = QApplication([])
     window = MainWindow(
         repository=repository,
         backup_service=backup_service,
         restore_service=restore_service,
+        scheduler_service=scheduler_service,
         mysql_service=mysql_service,
         platform_service=platform_service,
         log_service=log_service,
@@ -49,6 +53,7 @@ def main() -> int:
     assert title == "Heisenberg Backup Manager", title
     print(f"UI title verified: {title}")
     assert window.tabs.tabText(3) == "Restore", window.tabs.tabText(3)
+    assert window.tabs.tabText(4) == "Scheduler", window.tabs.tabText(4)
     window.close()
     app.quit()
     return 0
