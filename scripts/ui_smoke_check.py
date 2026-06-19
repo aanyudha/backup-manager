@@ -14,7 +14,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QListWidget
 
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.scheduler_state_repository import SchedulerStateRepository
@@ -26,6 +26,7 @@ from app.services.platform_service import PlatformService
 from app.services.restore_service import RestoreService
 from app.services.scheduler_service import SchedulerService
 from app.ui.main_window import MainWindow
+from app.ui.mysql_profiles_page import MySQLProfilesPage
 
 
 def main() -> int:
@@ -54,6 +55,13 @@ def main() -> int:
     print(f"UI title verified: {title}")
     assert window.tabs.tabText(3) == "Restore", window.tabs.tabText(3)
     assert window.tabs.tabText(4) == "Scheduler", window.tabs.tabText(4)
+    mysql_page = MySQLProfilesPage(mysql_service)
+    assert mysql_page.objectName() == "mysqlProfilesPage", mysql_page.objectName()
+    database_list = mysql_page.findChild(QListWidget, "databaseListWidget")
+    assert database_list is not None, "databaseListWidget not found"
+    assert database_list.minimumHeight() >= 160, database_list.minimumHeight()
+    print(f"MySQL database list minimum height verified: {database_list.minimumHeight()}")
+    mysql_page.close()
     window.close()
     app.quit()
     return 0

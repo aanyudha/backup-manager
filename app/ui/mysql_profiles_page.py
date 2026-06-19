@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QGridLayout,
-    QHBoxLayout,
+    QGroupBox,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QVBoxLayout,
@@ -38,19 +40,17 @@ class MySQLProfilesPage(QWidget):
 
     def __init__(self, mysql_service: MySQLService) -> None:
         super().__init__()
+        self.setObjectName("mysqlProfilesPage")
         self.mysql_service = mysql_service
         self._profiles: dict[str, MySQLBackupProfile] = {}
         self._current_id: str | None = None
 
         main_layout = QVBoxLayout(self)
-        splitter = QSplitter()
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
 
         self.profile_list = QListWidget()
         self.profile_list.currentItemChanged.connect(self._load_selected_profile)
-
-        form_container = QWidget()
-        form_layout = QVBoxLayout(form_container)
-        form = QFormLayout()
 
         self.name_edit = QLineEdit()
         self.host_edit = QLineEdit()
@@ -63,7 +63,13 @@ class MySQLProfilesPage(QWidget):
         self.database_mode_combo = QComboBox()
         self.database_mode_combo.addItems(["all", "single", "multiple"])
         self.database_list = QListWidget()
+        self.database_list.setObjectName("databaseListWidget")
         self.database_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.database_list.setMinimumHeight(180)
+        self.database_list.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self.enabled_checkbox = QCheckBox("Enabled")
         self.enabled_checkbox.setChecked(True)
         self.compress_checkbox = QCheckBox("Compress SQL backup as .sql.gz")
@@ -74,21 +80,6 @@ class MySQLProfilesPage(QWidget):
         self.retention_days_spin.setEnabled(False)
         self.schedule_fields = ScheduleFieldsSection()
 
-        form.addRow("Profile Name", self.name_edit)
-        form.addRow("Host", self.host_edit)
-        form.addRow("Port", self.port_edit)
-        form.addRow("Username", self.username_edit)
-        form.addRow("Password", self.password_edit)
-        form.addRow("mysqldump Path", self.mysqldump_path_edit)
-        form.addRow("Destination Folder", self.destination_edit)
-        form.addRow("Database Mode", self.database_mode_combo)
-        form.addRow("Database List", self.database_list)
-        form.addRow("", self.enabled_checkbox)
-        form.addRow("", self.compress_checkbox)
-        form.addRow("", self.retention_checkbox)
-        form.addRow("Retention Days", self.retention_days_spin)
-        self.schedule_fields.add_to_form(form)
-
         button_grid = QGridLayout()
         self.test_button = QPushButton("Test Connection")
         self.load_databases_button = QPushButton("Load Database List")
@@ -98,24 +89,75 @@ class MySQLProfilesPage(QWidget):
         self.new_button = QPushButton("New Profile")
 
         button_grid.addWidget(self.test_button, 0, 0)
-        button_grid.addWidget(self.load_databases_button, 0, 1)
-        button_grid.addWidget(self.save_button, 1, 0)
-        button_grid.addWidget(self.delete_button, 1, 1)
-        button_grid.addWidget(self.run_button, 2, 0)
-        button_grid.addWidget(self.new_button, 2, 1)
+        button_grid.addWidget(self.save_button, 0, 1)
+        button_grid.addWidget(self.delete_button, 1, 0)
+        button_grid.addWidget(self.run_button, 1, 1)
+        button_grid.addWidget(self.new_button, 2, 0, 1, 2)
 
         self.status_output = QPlainTextEdit()
         self.status_output.setReadOnly(True)
         self.status_output.setPlaceholderText("Connection tests and backup messages appear here.")
+        self.status_output.setMinimumHeight(100)
 
-        form_layout.addLayout(form)
-        form_layout.addLayout(button_grid)
-        form_layout.addWidget(QLabel("Status"))
-        form_layout.addWidget(self.status_output)
+        form_panel = QWidget()
+        form_panel_layout = QVBoxLayout(form_panel)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+
+        connection_group = QGroupBox("Connection")
+        connection_form = QFormLayout(connection_group)
+        connection_form.addRow("Profile Name", self.name_edit)
+        connection_form.addRow("Host", self.host_edit)
+        connection_form.addRow("Port", self.port_edit)
+        connection_form.addRow("Username", self.username_edit)
+        connection_form.addRow("Password", self.password_edit)
+
+        database_group = QGroupBox("Database Selection")
+        database_layout = QVBoxLayout(database_group)
+        database_form = QFormLayout()
+        database_form.addRow("Database Mode", self.database_mode_combo)
+        database_layout.addLayout(database_form)
+        database_layout.addWidget(self.load_databases_button)
+        database_layout.addWidget(self.database_list)
+
+        output_group = QGroupBox("Output")
+        output_layout = QVBoxLayout(output_group)
+        output_form = QFormLayout()
+        output_form.addRow("mysqldump Path", self.mysqldump_path_edit)
+        output_form.addRow("Destination Folder", self.destination_edit)
+        output_form.addRow("", self.enabled_checkbox)
+        output_form.addRow("", self.compress_checkbox)
+        output_form.addRow("", self.retention_checkbox)
+        output_form.addRow("Retention Days", self.retention_days_spin)
+        output_layout.addLayout(output_form)
+        output_layout.addWidget(QLabel("Status"))
+        output_layout.addWidget(self.status_output)
+
+        schedule_group = QGroupBox("Schedule")
+        schedule_form = QFormLayout(schedule_group)
+        self.schedule_fields.add_to_form(schedule_form)
+
+        actions_group = QGroupBox("Actions")
+        actions_group.setLayout(button_grid)
+
+        scroll_layout.addWidget(connection_group)
+        scroll_layout.addWidget(database_group)
+        scroll_layout.addWidget(output_group)
+        scroll_layout.addWidget(schedule_group)
+        scroll_layout.addStretch(1)
+
+        scroll_area.setWidget(scroll_content)
+        form_panel_layout.addWidget(scroll_area)
+        form_panel_layout.addWidget(actions_group)
 
         splitter.addWidget(self.profile_list)
-        splitter.addWidget(form_container)
+        splitter.addWidget(form_panel)
         splitter.setStretchFactor(1, 1)
+        splitter.setSizes([220, 680])
         main_layout.addWidget(splitter)
 
         self.test_button.clicked.connect(self._test_connection)
