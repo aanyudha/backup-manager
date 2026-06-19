@@ -60,7 +60,12 @@ class SchedulerService:
         return None
 
     def _is_schedulable(self, profile: Profile) -> bool:
-        return profile.enabled and profile.schedule_enabled and profile.schedule_type != "manual"
+        return (
+            profile.enabled
+            and profile.schedule_enabled
+            and profile.schedule_runner == "internal"
+            and profile.schedule_type != "manual"
+        )
 
     def _time_value(self, profile: Profile) -> time:
         hour_text, minute_text = (profile.schedule_time or "00:00").split(":")

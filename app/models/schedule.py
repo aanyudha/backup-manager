@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 ScheduleType = Literal["manual", "daily", "weekly", "monthly"]
+ScheduleRunner = Literal["internal", "external"]
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
@@ -14,6 +15,7 @@ class ScheduleFields(BaseModel):
     """Reusable schedule configuration stored on backup profiles."""
 
     schedule_enabled: bool = False
+    schedule_runner: ScheduleRunner = "internal"
     schedule_type: ScheduleType = "manual"
     schedule_time: str | None = None
     schedule_days_of_week: list[int] = Field(default_factory=list)

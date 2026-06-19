@@ -44,12 +44,13 @@ class SchedulerPage(QWidget):
         controls.addWidget(self.start_button)
         controls.addWidget(self.stop_button)
 
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
             [
                 "Profile Name",
                 "Type",
                 "Schedule Enabled",
+                "Runner",
                 "Schedule Summary",
                 "Last Run",
                 "Next Run",
@@ -87,6 +88,7 @@ class SchedulerPage(QWidget):
                 row["profile_name"],
                 row["type"],
                 row["schedule_enabled"],
+                row["runner"],
                 row["schedule_summary"],
                 row["last_run"],
                 row["next_run"],

@@ -112,20 +112,29 @@ HeisenbergBackupManager.exe --run-profile-id PROFILE_ID
 
 ## Scheduler
 
-- The MVP scheduler is internal only and runs while the desktop app is open.
-- It does not install Windows Task Scheduler entries or cron jobs automatically in `v0.3.1`.
+- Each profile has a `Schedule Runner`:
+  - `Internal Scheduler` runs only while the desktop app is open.
+  - `External OS Scheduler` is for Windows Task Scheduler or Linux cron exports.
+- Pick one runner mode per scheduled profile so the same backup is not triggered twice.
 - Supported schedule types are `manual`, `daily`, `weekly`, and `monthly`.
 - `daily` uses a single `HH:MM` time.
 - `weekly` uses `HH:MM` plus one or more weekdays where `0=Monday` through `6=Sunday`.
 - `monthly` uses `HH:MM` plus a day-of-month value from `1` to `31`.
 - If a monthly schedule is set past the end of the month, it runs on that month's last day.
 - `Run if missed` lets the app catch up later the same day after the scheduled minute has passed.
-- Use the `Scheduler` tab to review schedule summaries, last run details, next run times, and current status.
+- Internal scheduler runs only profiles where `Schedule Runner` is `Internal Scheduler`.
+- External export is allowed only for profiles where `Schedule Runner` is `External OS Scheduler`.
+- Use the `Scheduler` tab to review schedule summaries, runner mode, last run details, next run times, and current status.
+- For external profiles, the app shows `Managed by OS scheduler` instead of an internal next-run timestamp.
 - Use `Export External Schedule` to generate reviewable Windows and Linux commands for manual installation.
 - Use `Settings` to enable `Auto-start scheduler when app opens`.
 
 ## External Scheduler Export
 
+- Export does not install anything automatically.
+- Export registers an operating system schedule and does not run the backup immediately.
+- The exported schedule time is copied from the selected profile.
+- If you change the profile schedule later, export again.
 - Internal scheduler: runs only while the app is open.
 - External scheduler: lets the OS start one backup profile through the CLI runner.
 - Exported commands do not include stored credentials or passwords.
@@ -135,7 +144,12 @@ HeisenbergBackupManager.exe --run-profile-id PROFILE_ID
 Windows Task Scheduler example:
 
 ```powershell
-schtasks /Create /TN "Heisenberg Backup Manager\Primary_DB" /TR "\"C:\path\HeisenbergBackupManager.exe\" --run-profile-id profile-1" /SC DAILY /ST 10:15 /F
+schtasks /Create ^
+ /TN "Heisenberg Backup Manager\Primary_DB" ^
+ /TR "\"C:\backup-manager\.venv\Scripts\python.exe\" \"C:\backup-manager\app.py\" --run-profile-id profile-1" ^
+ /SC DAILY ^
+ /ST 10:15 ^
+ /F
 ```
 
 Linux cron example:
@@ -143,6 +157,16 @@ Linux cron example:
 ```bash
 15 10 * * * /path/to/python /path/to/app.py --run-profile-id profile-1 >> /path/to/logs/cron_Primary_DB.log 2>&1
 ```
+
+Saved Windows files:
+
+- `Primary_DB_register_windows_task.cmd`
+- `Primary_DB_run_now.cmd`
+
+Saved Linux files:
+
+- `Primary_DB_linux_cron.txt`
+- `Primary_DB_linux_run_now.sh`
 
 ## Scheduler Logs
 

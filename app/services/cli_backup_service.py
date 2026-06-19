@@ -28,10 +28,10 @@ class CliBackupService:
             elif profile_name:
                 result = self.backup_service.run_profile(self._resolve_profile_id_by_name(profile_name))
             else:
-                print("No profile selector was provided.", file=stdout)
+                print("[FAILED] message=No profile selector was provided.", file=stdout)
                 return 2
         except Exception as exc:
-            print(str(exc), file=stdout)
+            print(f"[FAILED] message={exc}", file=stdout)
             return 1
 
         print(self._format_summary(result), file=stdout)

@@ -77,7 +77,11 @@ class SchedulerWorker(QObject):
     def _process_due_profiles(self, *, notify_when_idle: bool) -> None:
         profiles = sorted(self.backup_service.list_profiles(), key=lambda item: item.name.lower())
         now = datetime.now().astimezone()
-        due_profiles = [profile for profile in profiles if self.scheduler_service.is_due(profile, now)]
+        due_profiles = [
+            profile
+            for profile in profiles
+            if profile.schedule_runner == "internal" and self.scheduler_service.is_due(profile, now)
+        ]
 
         if not due_profiles:
             if notify_when_idle:

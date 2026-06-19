@@ -43,11 +43,15 @@ python app.py
 4. Choose `all`, `single`, or `multiple` for database mode.
 5. Optionally enable `Compress SQL backup as .sql.gz` for streamed gzip output.
 6. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
-7. Optionally enable `Enable Schedule`, choose `manual`, `daily`, `weekly`, or `monthly`, and fill the matching schedule fields.
-8. Optionally leave `Run if missed` enabled so a missed daily, weekly, or monthly run still starts later that same day while the app is open.
-9. Use `Test Connection` to validate the credentials.
-10. Use `Load Database List` to fetch selectable databases.
-11. Click `Save Profile`.
+7. Optionally enable `Enable Schedule`.
+8. Choose `Schedule Runner`:
+   - `Internal Scheduler` if the app should run the backup while it is open.
+   - `External OS Scheduler` if Windows Task Scheduler or Linux cron should run the backup.
+9. Choose `manual`, `daily`, `weekly`, or `monthly`, and fill the matching schedule fields.
+10. Optionally leave `Run if missed` enabled so a missed daily, weekly, or monthly run still starts later that same day while the app is open.
+11. Use `Test Connection` to validate the credentials.
+12. Use `Load Database List` to fetch selectable databases.
+13. Click `Save Profile`.
 
 ## How To Create a Folder Profile
 
@@ -59,9 +63,13 @@ python app.py
    - `sync_without_delete`
    - `mirror_with_delete`
 5. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
-6. Optionally enable `Enable Schedule`, choose the schedule type, and fill the matching time, weekday, or day-of-month fields.
-7. Fill SFTP fields only when using an SFTP-based profile.
-8. Click `Validate`, then `Save Profile`.
+6. Optionally enable `Enable Schedule`.
+7. Choose `Schedule Runner`:
+   - `Internal Scheduler` if the app should run the backup while it is open.
+   - `External OS Scheduler` if Windows Task Scheduler or Linux cron should run the backup.
+8. Choose the schedule type, and fill the matching time, weekday, or day-of-month fields.
+9. Fill SFTP fields only when using an SFTP-based profile.
+10. Click `Validate`, then `Save Profile`.
 
 ## How To Run a Backup
 
@@ -75,13 +83,17 @@ python app.py
 1. Open either the `MySQL Profiles` or `Folder Profiles` tab.
 2. Edit or create a profile.
 3. Enable `Enable Schedule`.
-4. Choose one of these schedule types:
+4. Choose `Schedule Runner`:
+   - `Internal Scheduler` keeps scheduling inside the app.
+   - `External OS Scheduler` is for exported Windows Task Scheduler or Linux cron jobs.
+5. Choose one of these schedule types:
    - `manual` keeps the profile out of automatic runs.
    - `daily` uses the `Time` field.
    - `weekly` uses `Time` plus one or more weekday checkboxes.
    - `monthly` uses `Time` plus `Day of Month`.
-5. Leave `Run if missed` enabled if you want the app to catch up later that same day after the scheduled minute has passed.
-6. Save the profile.
+6. Leave `Run if missed` enabled if you want the app to catch up later that same day after the scheduled minute has passed.
+7. Save the profile.
+8. Use only one runner mode for a scheduled profile. Do not keep the same profile on both the internal scheduler and an OS scheduler.
 
 ## How To Start and Stop the Scheduler
 
@@ -94,12 +106,14 @@ python app.py
 
 ## How To Export an External Schedule
 
-1. Save a profile with `Enable Schedule` turned on and a non-`manual` schedule type.
+1. Save a profile with `Enable Schedule` turned on, `Schedule Runner` set to `External OS Scheduler`, and a non-`manual` schedule type.
 2. Open the `Scheduler` tab and select that profile in the table.
 3. Click `Export External Schedule`.
-4. Review the generated Windows `schtasks` command, Linux cron line, and notes.
-5. Use `Copy` or `Save` if you want a reusable command file in `exports/scheduler/`.
-6. Remember that export is review-only in `v0.3.1`; the app does not install tasks for you.
+4. Review the generated register command and the separate run-now command.
+5. The export registers an operating system schedule. It does not run the backup immediately.
+6. If you change the profile schedule later, export again so the OS scheduler matches the profile.
+7. Use `Copy` or `Save` if you want reusable files in `exports/scheduler/`.
+8. Remember that export is review-only in `v0.3.1`; the app does not install tasks for you.
 
 Windows manual install:
 
@@ -113,6 +127,19 @@ Linux manual install:
 2. Review the paths and adapt them for the target Linux machine if needed.
 3. Open `crontab -e` on that machine.
 4. Paste the reviewed line and save.
+
+## How To Export into `.exe` on Windows
+
+```powershell
+cd C:\backup-manager
+.venv\Scripts\activate
+python -m PyInstaller --noconfirm --windowed --name HeisenbergBackupManager app.py
+```
+
+- The built executable is written to `dist\HeisenbergBackupManager\HeisenbergBackupManager.exe`.
+- In frozen mode, exported run commands use:
+  - `"C:\path\HeisenbergBackupManager.exe" --run-profile-id PROFILE_ID`
+- If you rebuild the `.exe` in a different path, export external schedules again so the saved OS command points to the current executable.
 
 ## How To Run a Restore
 
@@ -151,7 +178,7 @@ Linux manual install:
 
 ## Known MVP Limitations
 
-- Scheduler only runs while the desktop app is open.
+- Internal scheduler only runs while the desktop app is open.
 - Scheduler export does not auto-install Windows Task Scheduler entries.
 - Scheduler export does not auto-edit `crontab`.
 - Cloud backup is not implemented yet.

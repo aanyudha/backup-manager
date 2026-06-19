@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QSpinBox,
     QWidget,
@@ -30,6 +31,14 @@ class ScheduleFieldsSection:
 
     def __init__(self) -> None:
         self.schedule_enabled_checkbox = QCheckBox("Enable Schedule")
+        self.schedule_runner_combo = QComboBox()
+        self.schedule_runner_combo.addItem("Internal Scheduler", userData="internal")
+        self.schedule_runner_combo.addItem("External OS Scheduler", userData="external")
+        self.schedule_runner_help = QLabel(
+            "Internal Scheduler runs only while this app is open.\n"
+            "External OS Scheduler uses Windows Task Scheduler or Linux cron."
+        )
+        self.schedule_runner_help.setWordWrap(True)
         self.schedule_type_combo = QComboBox()
         self.schedule_type_combo.addItems(["manual", "daily", "weekly", "monthly"])
         self.schedule_time_edit = QLineEdit()
@@ -57,6 +66,8 @@ class ScheduleFieldsSection:
     def add_to_form(self, form: QFormLayout) -> None:
         """Append the scheduler rows to an existing form layout."""
         form.addRow("", self.schedule_enabled_checkbox)
+        form.addRow("Schedule Runner", self.schedule_runner_combo)
+        form.addRow("", self.schedule_runner_help)
         form.addRow("Schedule Type", self.schedule_type_combo)
         form.addRow("Time", self.schedule_time_edit)
         form.addRow("Days of Week", self.days_widget)
@@ -66,6 +77,7 @@ class ScheduleFieldsSection:
     def clear(self) -> None:
         """Reset the controls to defaults for a new profile."""
         self.schedule_enabled_checkbox.setChecked(False)
+        self.schedule_runner_combo.setCurrentIndex(0)
         self.schedule_type_combo.setCurrentText("manual")
         self.schedule_time_edit.clear()
         for checkbox in self.day_checkboxes.values():
@@ -77,6 +89,9 @@ class ScheduleFieldsSection:
     def load_profile(self, profile: Profile) -> None:
         """Populate the controls from a persisted profile."""
         self.schedule_enabled_checkbox.setChecked(profile.schedule_enabled)
+        self.schedule_runner_combo.setCurrentIndex(
+            self.schedule_runner_combo.findData(profile.schedule_runner)
+        )
         self.schedule_type_combo.setCurrentText(profile.schedule_type)
         self.schedule_time_edit.setText(profile.schedule_time or "")
         for day, checkbox in self.day_checkboxes.items():
@@ -90,6 +105,7 @@ class ScheduleFieldsSection:
         schedule_type = self.schedule_type_combo.currentText()
         payload.update(
             schedule_enabled=self.schedule_enabled_checkbox.isChecked(),
+            schedule_runner=str(self.schedule_runner_combo.currentData()),
             schedule_type=schedule_type,
             schedule_time=self.schedule_time_edit.text() or None,
             schedule_days_of_week=[

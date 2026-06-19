@@ -417,10 +417,10 @@ class MainWindow(QMainWindow):
 
         dialog = ExternalSchedulerExportDialog(profile.name, export)
         dialog.save_windows_button.clicked.connect(
-            lambda: self._save_windows_export(profile, export.windows_command)
+            lambda: self._save_windows_export(profile)
         )
         dialog.save_linux_button.clicked.connect(
-            lambda: self._save_linux_export(profile, export.linux_cron)
+            lambda: self._save_linux_export(profile)
         )
         dialog.exec()
 
@@ -472,15 +472,23 @@ class MainWindow(QMainWindow):
         rows: list[dict[str, str]] = []
         for profile in sorted(profiles, key=lambda item: item.name.lower()):
             next_run = self.scheduler_service.get_next_run(profile, now)
+            next_run_text = self._format_datetime(next_run)
+            if (
+                profile.schedule_enabled
+                and profile.schedule_runner == "external"
+                and profile.schedule_type != "manual"
+            ):
+                next_run_text = "Managed by OS scheduler"
             rows.append(
                 {
                     "profile_id": profile.id,
                     "profile_name": profile.name,
-                    "type": profile.schedule_type,
+                    "type": profile.type,
                     "schedule_enabled": "Yes" if profile.schedule_enabled else "No",
+                    "runner": self._format_schedule_runner(profile.schedule_runner),
                     "schedule_summary": self.scheduler_service.get_schedule_summary(profile),
                     "last_run": self._format_datetime(profile.last_run_at),
-                    "next_run": self._format_datetime(next_run),
+                    "next_run": next_run_text,
                     "last_status": profile.last_status or "",
                 }
             )
@@ -547,16 +555,24 @@ class MainWindow(QMainWindow):
             return ""
         return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
-    def _save_windows_export(self, profile: Profile, windows_command: str) -> None:
-        """Persist the Windows scheduler export file."""
-        path = self.external_scheduler_service.save_windows_command(profile, windows_command)
-        self.scheduler_page.append_status(f"Saved Windows export: {path}")
-        self.dashboard_page.append_status(f"Saved Windows export for '{profile.name}'.")
-        QMessageBox.information(self, "Export External Schedule", f"Saved Windows export:\n{path}")
+    @staticmethod
+    def _format_schedule_runner(schedule_runner: str) -> str:
+        if schedule_runner == "external":
+            return "External OS Scheduler"
+        return "Internal Scheduler"
 
-    def _save_linux_export(self, profile: Profile, linux_cron: str) -> None:
-        """Persist the Linux cron export file."""
-        path = self.external_scheduler_service.save_linux_cron(profile, linux_cron)
-        self.scheduler_page.append_status(f"Saved Linux export: {path}")
+    def _save_windows_export(self, profile: Profile) -> None:
+        """Persist the Windows scheduler export files."""
+        paths = self.external_scheduler_service.save_windows_exports(profile, self.path_service.executable_path())
+        joined_paths = "\n".join(str(path) for path in paths)
+        self.scheduler_page.append_status(f"Saved Windows exports:\n{joined_paths}")
+        self.dashboard_page.append_status(f"Saved Windows export for '{profile.name}'.")
+        QMessageBox.information(self, "Export External Schedule", f"Saved Windows exports:\n{joined_paths}")
+
+    def _save_linux_export(self, profile: Profile) -> None:
+        """Persist the Linux scheduler export files."""
+        paths = self.external_scheduler_service.save_linux_exports(profile, self.path_service.executable_path())
+        joined_paths = "\n".join(str(path) for path in paths)
+        self.scheduler_page.append_status(f"Saved Linux exports:\n{joined_paths}")
         self.dashboard_page.append_status(f"Saved Linux export for '{profile.name}'.")
-        QMessageBox.information(self, "Export External Schedule", f"Saved Linux export:\n{path}")
+        QMessageBox.information(self, "Export External Schedule", f"Saved Linux exports:\n{joined_paths}")

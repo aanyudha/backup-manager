@@ -38,11 +38,16 @@ def test_repository_create_update_delete(tmp_path: Path) -> None:
     """Profiles should round-trip through create, update, and delete."""
     repository = ProfileRepository(tmp_path / "config")
     profile = build_folder_profile()
+    profile.schedule_enabled = True
+    profile.schedule_runner = "external"
+    profile.schedule_type = "daily"
+    profile.schedule_time = "10:00"
 
     repository.create(profile)
     stored = repository.get_by_id(profile.id)
     assert stored is not None
     assert stored.name == "Documents"
+    assert stored.schedule_runner == "external"
 
     stored.name = "Pictures"
     repository.update(stored)
