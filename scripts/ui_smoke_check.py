@@ -1,8 +1,18 @@
-"""Application entry point for Heisenberg Backup Manager."""
+"""Headless UI smoke check for Heisenberg Backup Manager."""
 
 from __future__ import annotations
 
+import os
+import platform
+from pathlib import Path
 import sys
+
+if platform.system().lower() == "linux":
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from PySide6.QtWidgets import QApplication
 
@@ -16,9 +26,7 @@ from app.ui.main_window import MainWindow
 
 
 def main() -> int:
-    """Start the desktop application."""
-    app = QApplication(sys.argv)
-
+    """Instantiate the Qt application and main window without entering the event loop."""
     path_service = PathService()
     repository = ProfileRepository(path_service.config_dir())
     platform_service = PlatformService()
@@ -26,6 +34,7 @@ def main() -> int:
     mysql_service = MySQLService()
     backup_service = BackupService(repository, platform_service, log_service)
 
+    app = QApplication([])
     window = MainWindow(
         repository=repository,
         backup_service=backup_service,
@@ -33,8 +42,12 @@ def main() -> int:
         platform_service=platform_service,
         log_service=log_service,
     )
-    window.show()
-    return app.exec()
+    title = window.windowTitle()
+    assert title == "Heisenberg Backup Manager", title
+    print(f"UI title verified: {title}")
+    window.close()
+    app.quit()
+    return 0
 
 
 if __name__ == "__main__":

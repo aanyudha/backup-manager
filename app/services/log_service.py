@@ -11,9 +11,8 @@ from re import sub
 class LogService:
     """Create and manage application and per-backup log files."""
 
-    def __init__(self, root_dir: Path) -> None:
-        self.root_dir = root_dir
-        self.logs_dir = self.root_dir / "logs"
+    def __init__(self, logs_dir: Path) -> None:
+        self.logs_dir = logs_dir
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.app_logger = self._build_daily_logger()
 
@@ -71,4 +70,3 @@ class LogService:
             else:
                 masked.append(arg)
         return " ".join(masked)
-

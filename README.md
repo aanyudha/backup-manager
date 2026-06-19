@@ -66,19 +66,24 @@ python scripts/smoke_check.py
 python -m pytest -q
 ```
 
-## Build With PyInstaller
+## Packaging
 
 Windows:
 
 ```bash
-pyinstaller --noconfirm --windowed --name HeisenbergBackupManager app.py
+python -m PyInstaller --noconfirm --windowed --name HeisenbergBackupManager app.py
 ```
 
 Linux:
 
 ```bash
-pyinstaller --noconfirm --name heisenberg-backup-manager app.py
+python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 ```
+
+- `dist/` output is ignored by git.
+- `build/` and `*.spec` are ignored by git.
+- Local config files may be created during development or packaging checks.
+- Do not commit real `config/profiles.json` or `config/settings.json` files.
 
 ## Windows Notes
 
@@ -134,4 +139,3 @@ MIT License.
 ## Contributing
 
 Contributions are welcome. Please open an issue or pull request with a clear description, keep the architecture modular, add or update tests when behavior changes, and avoid mixing UI logic with backup execution code.
-

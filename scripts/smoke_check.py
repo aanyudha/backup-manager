@@ -13,17 +13,19 @@ from app.repositories.profile_repository import ProfileRepository
 from app.services.backup_service import BackupService
 from app.services.log_service import LogService
 from app.services.mysql_service import MySQLService
+from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
 from app.ui.main_window import MainWindow
 
 
 def main() -> int:
     """Run a lightweight import and environment smoke check."""
-    root_dir = ROOT_DIR
-    config_dir = root_dir / "config"
+    path_service = PathService()
+    config_dir = path_service.config_dir()
+    logs_dir = path_service.logs_dir()
 
     platform_service = PlatformService()
-    log_service = LogService(root_dir)
+    log_service = LogService(logs_dir)
     repository = ProfileRepository(config_dir)
     mysql_service = MySQLService()
     backup_service = BackupService(repository, platform_service, log_service)
@@ -31,6 +33,7 @@ def main() -> int:
     print(f"Detected OS: {platform_service.system_name()}")
     print(f"Available engines: {', '.join(platform_service.get_available_engines())}")
     print(f"Config directory ready: {config_dir.exists()} -> {config_dir}")
+    print(f"Logs directory ready: {logs_dir.exists()} -> {logs_dir}")
 
     # Import-side verification for major desktop modules without starting the UI.
     _ = backup_service, mysql_service, MainWindow
