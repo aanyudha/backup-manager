@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -73,6 +74,7 @@ class RestorePage(QWidget):
         self.mysql_password_edit = QLineEdit()
         self.mysql_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.mysql_path_edit = QLineEdit()
+        self.mysql_create_database_checkbox = QCheckBox("Create database if missing")
 
         form.addRow("SQL File", self.mysql_sql_file_edit)
         form.addRow("Database", self.mysql_database_edit)
@@ -81,10 +83,11 @@ class RestorePage(QWidget):
         form.addRow("Username", self.mysql_username_edit)
         form.addRow("Password", self.mysql_password_edit)
         form.addRow("mysql Path", self.mysql_path_edit)
+        form.addRow("", self.mysql_create_database_checkbox)
         layout.addLayout(form)
 
         buttons = QGridLayout()
-        self.mysql_validate_button = QPushButton("Validate SQL File")
+        self.mysql_validate_button = QPushButton("Validate")
         self.mysql_test_button = QPushButton("Test Connection")
         self.mysql_restore_button = QPushButton("Run Restore")
         buttons.addWidget(self.mysql_validate_button, 0, 0)
@@ -92,9 +95,7 @@ class RestorePage(QWidget):
         buttons.addWidget(self.mysql_restore_button, 1, 0, 1, 2)
         layout.addLayout(buttons)
 
-        self.mysql_validate_button.clicked.connect(
-            lambda: self.mysql_validate_requested.emit({"sql_file": self.mysql_sql_file_edit.text()})
-        )
+        self.mysql_validate_button.clicked.connect(lambda: self.mysql_validate_requested.emit(self.mysql_restore_payload()))
         self.mysql_test_button.clicked.connect(lambda: self.mysql_test_requested.emit(self.mysql_connection_payload()))
         self.mysql_restore_button.clicked.connect(lambda: self.mysql_restore_requested.emit(self.mysql_restore_payload()))
         return group
@@ -142,6 +143,7 @@ class RestorePage(QWidget):
                 "sql_file": self.mysql_sql_file_edit.text(),
                 "database": self.mysql_database_edit.text(),
                 "mysql_path": self.mysql_path_edit.text() or None,
+                "create_database_if_missing": self.mysql_create_database_checkbox.isChecked(),
             }
         )
         return payload
@@ -191,6 +193,10 @@ class RestorePage(QWidget):
         """Clear the restore status panel."""
         self.status_output.clear()
 
+    def show_restore_result(self, result: RestoreResult) -> None:
+        """Display a consistent restore result summary in the status panel."""
+        self.append_status(self.format_restore_result(result))
+
     def set_running(self, running: bool) -> None:
         """Disable restore actions while background work is active."""
         for button in [
@@ -207,3 +213,16 @@ class RestorePage(QWidget):
         if not value:
             return ""
         return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def format_restore_result(result: RestoreResult) -> str:
+        """Render restore results with the details operators need after a run."""
+        status = "Success" if result.success else "Failed"
+        log_file = result.log_file or "N/A"
+        return (
+            f"Restore finished.\n"
+            f"Status: {status}\n"
+            f"Duration: {result.duration_seconds:.2f}s\n"
+            f"Log file: {log_file}\n"
+            f"Message: {result.message}"
+        )

@@ -70,14 +70,19 @@ python app.py
 2. For MySQL restore:
    - Enter the SQL file path.
    - Enter the target database, host, port, username, and password.
+   - The target database field is required and is where the SQL file will be restored.
    - Optionally enter a custom `mysql` client path.
-   - Use `Validate SQL File` and `Test Connection`.
+   - Optionally enable `Create database if missing` if the target database may not exist yet.
+   - Use `Validate` to check the SQL file, MySQL client, connection, and target database behavior before restore.
+   - Use `Test Connection` if you only want to verify credentials and connectivity.
    - Click `Run Restore`.
 3. For folder restore:
    - Enter the backup source folder.
    - Enter the restore destination folder.
    - Click `Validate`, then `Run Restore`.
-4. Confirm the prompt: `This operation may overwrite existing data. Continue?`
+4. Confirm the prompt carefully:
+   - MySQL restore warns that it may overwrite existing database objects in the selected target database.
+   - Folder restore warns that matching destination files may be overwritten and that destination-only files will not be deleted.
 5. Watch progress in the restore status panel and review entries in `Restore History`.
 
 ## Where Logs Are Stored

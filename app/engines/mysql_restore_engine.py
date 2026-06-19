@@ -45,24 +45,24 @@ class MySQLRestoreEngine:
         """Resolve the mysql executable path."""
         if mysql_path:
             candidate = Path(mysql_path).expanduser()
-            if not candidate.exists():
-                raise FileNotFoundError(f"mysql client path not found: {candidate}")
+            if not candidate.exists() or not candidate.is_file():
+                raise FileNotFoundError("MySQL client not found.")
             return str(candidate)
 
         resolved = shutil.which("mysql")
         if not resolved:
-            raise FileNotFoundError("mysql client was not found on PATH.")
+            raise FileNotFoundError("MySQL client not found.")
         return resolved
 
     def validate_sql_file(self, sql_file: str) -> Path:
         """Validate and normalize the incoming SQL restore file."""
         path = Path(sql_file).expanduser()
         if not path.exists():
-            raise FileNotFoundError(f"SQL file not found: {path}")
+            raise FileNotFoundError("SQL file not found.")
         if not path.is_file():
-            raise ValueError(f"SQL file path is not a file: {path}")
+            raise FileNotFoundError("SQL file not found.")
         if not self.is_supported_sql_file(path):
-            raise ValueError("SQL file must end with .sql or .sql.gz.")
+            raise ValueError("Unsupported restore file type. Use .sql or .sql.gz.")
         return path
 
     def is_supported_sql_file(self, path: Path) -> bool:
@@ -171,9 +171,9 @@ class MySQLRestoreEngine:
         if not username.strip():
             raise ValueError("Username is required.")
         if not database.strip():
-            raise ValueError("Database is required.")
+            raise ValueError("Target database is required.")
         if port <= 0:
-            raise ValueError("Port must be greater than zero.")
+            raise ValueError("Port must be a valid integer.")
         validated_file = self.validate_sql_file(sql_file)
         self.resolve_mysql(mysql_path)
         return validated_file

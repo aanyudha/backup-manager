@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from app.engines.folder_restore_engine import FolderRestoreEngine
 from app.services.log_service import LogService
 
@@ -44,3 +46,48 @@ def test_folder_restore_overwrites_existing_files(tmp_path: Path) -> None:
 
     assert result.success is True
     assert existing.read_text(encoding="utf-8") == "fresh-value=true\n"
+
+
+def test_folder_restore_validation_fails_when_source_is_missing(tmp_path: Path) -> None:
+    """Folder restore validation should fail when the backup source does not exist."""
+    engine = FolderRestoreEngine(LogService(tmp_path / "logs"))
+
+    with pytest.raises(FileNotFoundError, match="Backup source folder not found:"):
+        engine.validate_paths(str(tmp_path / "missing"), str(tmp_path / "destination"))
+
+
+def test_folder_restore_validation_creates_destination_when_missing(tmp_path: Path) -> None:
+    """Folder restore validation should create the destination directory when needed."""
+    source = tmp_path / "backup"
+    source.mkdir()
+    destination = tmp_path / "new-destination"
+    engine = FolderRestoreEngine(LogService(tmp_path / "logs"))
+
+    source_path, destination_path = engine.validate_paths(str(source), str(destination))
+
+    assert source_path == source
+    assert destination_path == destination
+    assert destination.exists()
+    assert destination.is_dir()
+
+
+def test_folder_restore_validation_reports_writable_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Folder restore validation should surface destination write failures clearly."""
+    source = tmp_path / "backup"
+    source.mkdir()
+    destination = tmp_path / "locked"
+    engine = FolderRestoreEngine(LogService(tmp_path / "logs"))
+    original_open = Path.open
+
+    def fake_open(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if self.name == ".restore_write_test":
+            raise OSError("permission denied")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fake_open)
+
+    with pytest.raises(PermissionError, match="Restore destination is not writable:"):
+        engine.validate_paths(str(source), str(destination))

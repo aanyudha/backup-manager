@@ -25,8 +25,25 @@ class FolderRestoreEngine:
             raise FileNotFoundError(f"Backup source folder not found: {source_path}")
         if not source_path.is_dir():
             raise ValueError(f"Backup source must be a folder: {source_path}")
-        destination_path.mkdir(parents=True, exist_ok=True)
+        if destination_path.exists() and not destination_path.is_dir():
+            raise ValueError(f"Restore destination must be a folder: {destination_path}")
+        self.ensure_destination_writable(destination_path)
         return source_path, destination_path
+
+    def ensure_destination_writable(self, destination_path: Path) -> None:
+        """Create the destination when needed and verify that it can be written."""
+        probe_path = destination_path / ".restore_write_test"
+        try:
+            destination_path.mkdir(parents=True, exist_ok=True)
+            with probe_path.open("wb") as handle:
+                handle.write(b"ok")
+        except OSError as exc:
+            raise PermissionError(f"Restore destination is not writable: {destination_path}") from exc
+        finally:
+            try:
+                probe_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def run(
         self,

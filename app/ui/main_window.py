@@ -171,12 +171,21 @@ class MainWindow(QMainWindow):
         self.worker_thread.start()
 
     def validate_mysql_restore_file(self, payload: dict[str, object]) -> None:
-        """Validate the selected SQL restore file."""
+        """Validate the selected MySQL restore request."""
         try:
-            _, message = self.restore_service.validate_mysql_file(str(payload.get("sql_file", "")))
+            _, message = self.restore_service.validate_mysql_restore(
+                sql_file=str(payload.get("sql_file", "")),
+                host=str(payload.get("host", "")),
+                port=payload.get("port", "3306"),
+                username=str(payload.get("username", "")),
+                password=str(payload.get("password", "")),
+                database=str(payload.get("database", "")),
+                mysql_path=self._normalize_optional_payload_text(payload.get("mysql_path")),
+                create_database_if_missing=bool(payload.get("create_database_if_missing", False)),
+            )
         except Exception as exc:
             self.restore_page.append_status(str(exc))
-            QMessageBox.warning(self, "Validate SQL File", str(exc))
+            QMessageBox.warning(self, "Validate Restore", str(exc))
             return
         self.restore_page.append_status(message)
 
@@ -185,7 +194,7 @@ class MainWindow(QMainWindow):
         try:
             success, message = self.restore_service.test_mysql_connection(
                 host=str(payload.get("host", "")),
-                port=int(payload.get("port", 3306)),
+                port=payload.get("port", "3306"),
                 username=str(payload.get("username", "")),
                 password=str(payload.get("password", "")),
             )
@@ -216,29 +225,32 @@ class MainWindow(QMainWindow):
         if self.worker_thread is not None:
             QMessageBox.information(self, "Restore Running", "Wait for the current operation to finish.")
             return
-        if not self._confirm_restore():
-            return
         try:
-            payload = {
-                "sql_file": str(payload.get("sql_file", "")),
-                "host": str(payload.get("host", "")),
-                "port": int(str(payload.get("port", "3306")) or "3306"),
-                "username": str(payload.get("username", "")),
-                "password": str(payload.get("password", "")),
-                "database": str(payload.get("database", "")),
-                "mysql_path": payload.get("mysql_path"),
-            }
-        except ValueError as exc:
+            validated_payload, validation_message = self.restore_service.validate_mysql_restore(
+                sql_file=str(payload.get("sql_file", "")),
+                host=str(payload.get("host", "")),
+                port=payload.get("port", "3306"),
+                username=str(payload.get("username", "")),
+                password=str(payload.get("password", "")),
+                database=str(payload.get("database", "")),
+                mysql_path=self._normalize_optional_payload_text(payload.get("mysql_path")),
+                create_database_if_missing=bool(payload.get("create_database_if_missing", False)),
+            )
+        except Exception as exc:
+            self.restore_page.append_status(str(exc))
             QMessageBox.warning(self, "Run Restore", str(exc))
+            return
+        if not self._confirm_mysql_restore(validated_payload):
             return
 
         self.restore_page.clear_status()
-        database = str(payload.get("database", "")).strip() or "database"
+        database = str(validated_payload.get("database", "")).strip() or "database"
+        self.restore_page.append_status(validation_message)
         self.restore_page.append_status(f"Starting MySQL restore for '{database}'.")
         self._set_running(True)
 
         self.worker_thread = QThread(self)
-        self.worker = RestoreWorker(self.restore_service, "mysql", payload)
+        self.worker = RestoreWorker(self.restore_service, "mysql", validated_payload)
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
         self.worker.started.connect(lambda restore_type: self.restore_page.append_status(f"Restore worker started ({restore_type})."))
@@ -255,15 +267,25 @@ class MainWindow(QMainWindow):
         if self.worker_thread is not None:
             QMessageBox.information(self, "Restore Running", "Wait for the current operation to finish.")
             return
-        if not self._confirm_restore():
+        if not self._confirm_folder_restore(payload):
+            return
+        try:
+            validated_payload, validation_message = self.restore_service.validate_folder_restore(
+                str(payload.get("source", "")),
+                str(payload.get("destination", "")),
+            )
+        except Exception as exc:
+            self.restore_page.append_status(str(exc))
+            QMessageBox.warning(self, "Run Restore", str(exc))
             return
 
         self.restore_page.clear_status()
+        self.restore_page.append_status(validation_message)
         self.restore_page.append_status("Starting folder restore.")
         self._set_running(True)
 
         self.worker_thread = QThread(self)
-        self.worker = RestoreWorker(self.restore_service, "folder", payload)
+        self.worker = RestoreWorker(self.restore_service, "folder", validated_payload)
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
         self.worker.started.connect(lambda restore_type: self.restore_page.append_status(f"Restore worker started ({restore_type})."))
@@ -286,7 +308,7 @@ class MainWindow(QMainWindow):
             self.dashboard_page.append_status(result.message)
         elif isinstance(result, RestoreResult):
             self.dashboard_page.append_status(result.message)
-            self.restore_page.append_status(result.message)
+            self.restore_page.show_restore_result(result)
         self.logs_page.refresh()
         self.refresh_all()
         self._set_running(False)
@@ -311,13 +333,57 @@ class MainWindow(QMainWindow):
         self.folder_profiles_page.set_running(running)
         self.restore_page.set_running(running)
 
-    def _confirm_restore(self) -> bool:
-        """Confirm the destructive restore action with the user."""
+    def _confirm_mysql_restore(self, payload: dict[str, object]) -> bool:
+        """Confirm the destructive MySQL restore action with the user."""
         answer = QMessageBox.question(
             self,
             "Confirm Restore",
-            "This operation may overwrite existing data. Continue?",
+            self.build_mysql_restore_confirmation(
+                database=str(payload.get("database", "")).strip(),
+                sql_file=str(payload.get("sql_file", "")).strip(),
+            ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         return answer == QMessageBox.StandardButton.Yes
+
+    def _confirm_folder_restore(self, payload: dict[str, object]) -> bool:
+        """Confirm the destructive folder restore action with the user."""
+        answer = QMessageBox.question(
+            self,
+            "Confirm Restore",
+            self.build_folder_restore_confirmation(destination=str(payload.get("destination", "")).strip()),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    @staticmethod
+    def build_mysql_restore_confirmation(*, database: str, sql_file: str) -> str:
+        """Return the MySQL restore confirmation dialog text."""
+        return (
+            "This restore may overwrite existing database objects in:\n"
+            f"{database}\n\n"
+            "Source file:\n"
+            f"{sql_file}\n\n"
+            "Continue?"
+        )
+
+    @staticmethod
+    def build_folder_restore_confirmation(*, destination: str) -> str:
+        """Return the folder restore confirmation dialog text."""
+        return (
+            "This restore will copy files into:\n"
+            f"{destination}\n\n"
+            "Existing files with the same name may be overwritten.\n"
+            "No files will be deleted.\n\n"
+            "Continue?"
+        )
+
+    @staticmethod
+    def _normalize_optional_payload_text(value: object) -> str | None:
+        """Collapse blank optional payload values to None."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None

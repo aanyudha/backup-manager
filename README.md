@@ -73,9 +73,15 @@ python -m pytest -q
 
 - Open the `Restore` tab to access MySQL and folder restore tools.
 - MySQL restore supports `.sql` and `.sql.gz` sources and runs through the `mysql` client.
+- The `Database` field is the target database that the SQL file will be restored into.
+- Enable `Create database if missing` to create that target database before the restore starts.
 - If the MySQL client path is left blank, the app searches `PATH`.
+- MySQL restore validates the source file, connection settings, target database name, and `mysql` client availability before it starts.
 - Folder restore copies files recursively into the destination and overwrites existing files without deleting extra destination data.
-- Every restore asks for confirmation before it starts: `This operation may overwrite existing data. Continue?`
+- Folder restore creates a missing destination folder during validation if it can do so safely.
+- Restore is destructive: MySQL restore may overwrite existing database objects, and folder restore overwrites matching destination files.
+- Folder restore does not delete destination-only files.
+- Every restore asks for a target-specific confirmation before it starts.
 
 ## Restore Logs
 
@@ -127,6 +133,8 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - MySQL passwords are never written to logs in plaintext.
 - Fatal restore output such as `Access denied`, `Unknown database`, and connection failures is treated as a failed restore.
 - `.sql.gz` files are decompressed to a temporary SQL file before the restore runs.
+- Empty database names are rejected, and database names containing backticks are not allowed.
+- If `Create database if missing` is disabled, restore fails fast when the target database does not exist.
 
 ## Folder Backup Notes
 
@@ -140,6 +148,7 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - The MVP restore mode is overwrite-only.
 - Missing destination folders are created automatically.
 - Existing files are overwritten, but no files or folders are deleted automatically.
+- Validation checks that the destination can be created and written before restore starts.
 
 ## SFTP Notes
 
