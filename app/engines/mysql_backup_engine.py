@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import os
 import shutil
 import subprocess
@@ -15,6 +14,7 @@ import pymysql
 from app.engines.base import BaseBackupEngine, ProgressCallback
 from app.models.profile import MySQLBackupProfile
 from app.models.result import BackupResult
+from app.services.compression_service import CompressionService, CompressionServiceError
 from app.services.log_service import LogService
 
 FATAL_STDERR_PATTERNS = (
@@ -47,10 +47,15 @@ class MySQLDumpCommand:
 
 
 class MySQLBackupEngine(BaseBackupEngine):
-    """Run `mysqldump` and capture its output to a `.sql` file."""
+    """Run `mysqldump` and capture its output to a `.sql` or `.sql.gz` file."""
 
-    def __init__(self, log_service: LogService) -> None:
+    def __init__(
+        self,
+        log_service: LogService,
+        compression_service: CompressionService | None = None,
+    ) -> None:
         self.log_service = log_service
+        self.compression_service = compression_service or CompressionService()
 
     def resolve_mysqldump(self, profile: MySQLBackupProfile) -> str:
         """Resolve the mysqldump executable path."""
@@ -159,16 +164,20 @@ class MySQLBackupEngine(BaseBackupEngine):
             version_text = completed.stderr.decode("utf-8", errors="replace").strip()
         return version_text or "unknown"
 
-    def execute_dump(self, command: MySQLDumpCommand, output_path: Path) -> subprocess.CompletedProcess[bytes]:
-        """Execute mysqldump and write stdout to the output path."""
-        with output_path.open("wb") as output_file:
-            return subprocess.run(
-                command.args,
-                stdout=output_file,
-                stderr=subprocess.PIPE,
-                env=command.env,
-                check=False,
-            )
+    def execute_dump(
+        self,
+        command: MySQLDumpCommand,
+        output_path: Path,
+        *,
+        compress: bool,
+    ) -> subprocess.CompletedProcess[bytes]:
+        """Execute mysqldump and write stdout to the final output path."""
+        return self.compression_service.execute_mysql_dump(
+            args=command.args,
+            env=command.env,
+            output_path=output_path,
+            compress=compress,
+        )
 
     def decode_stderr(self, completed: subprocess.CompletedProcess[bytes]) -> str:
         """Decode stderr into UTF-8 text."""
@@ -229,9 +238,12 @@ class MySQLBackupEngine(BaseBackupEngine):
         logger, log_path = self.log_service.create_backup_logger(profile.name, started_at)
         destination_dir = Path(profile.destination).expanduser()
         destination_dir.mkdir(parents=True, exist_ok=True)
-
-        filename = f"{self.log_service.safe_name(profile.name)}_{started_at.strftime('%Y%m%d_%H%M%S')}.sql"
-        output_path = destination_dir / filename
+        output_path = self.compression_service.build_mysql_output_path(
+            destination_dir=destination_dir,
+            safe_profile_name=self.log_service.safe_name(profile.name),
+            started_at=started_at,
+            compress=profile.compress,
+        )
 
         command = self.build_dump_command(profile)
         logger.info("Starting MySQL backup for profile '%s'.", profile.name)
@@ -240,28 +252,30 @@ class MySQLBackupEngine(BaseBackupEngine):
         logger.info("mysqldump Version: %s", self.get_mysqldump_version(command.args[0]))
         logger.info("Database Mode: %s", profile.database_mode)
         logger.info("Selected Databases: %s", self.describe_selected_databases(profile))
+        logger.info("Compression Enabled: %s", profile.compress)
+        logger.info("Output Path: %s", output_path)
         if progress:
             progress(f"Running mysqldump for {profile.name}...")
 
-        completed = self.execute_dump(command, output_path)
-        stderr_text = self.decode_stderr(completed)
-
-        if completed.returncode != 0 and self.should_retry_without_column_statistics(stderr_text):
-            logger.warning("Retrying mysqldump without --column-statistics=0 for compatibility.")
-            command = self.build_dump_command(profile, include_column_statistics=False)
-            logger.info("Retry Command: %s", self.build_log_command(profile, command))
-            completed = self.execute_dump(command, output_path)
+        try:
+            completed = self.execute_dump(command, output_path, compress=profile.compress)
             stderr_text = self.decode_stderr(completed)
 
-        success = completed.returncode == 0 and not self.contains_fatal_stderr(stderr_text)
+            if completed.returncode != 0 and self.should_retry_without_column_statistics(stderr_text):
+                logger.warning("Retrying mysqldump without --column-statistics=0 for compatibility.")
+                command = self.build_dump_command(profile, include_column_statistics=False)
+                logger.info("Retry Command: %s", self.build_log_command(profile, command))
+                completed = self.execute_dump(command, output_path, compress=profile.compress)
+                stderr_text = self.decode_stderr(completed)
 
-        if profile.compress and success:
-            compressed_path = output_path.with_suffix(".sql.gz")
-            with output_path.open("rb") as source_handle, gzip.open(compressed_path, "wb") as target_handle:
-                shutil.copyfileobj(source_handle, target_handle)
-            output_path.unlink(missing_ok=True)
-            output_path = compressed_path
-        message = self.build_result_message(success=success, stderr_text=stderr_text)
+            success = completed.returncode == 0 and not self.contains_fatal_stderr(stderr_text)
+            message = self.build_result_message(success=success, stderr_text=stderr_text)
+        except CompressionServiceError as exc:
+            completed = subprocess.CompletedProcess(args=command.args, returncode=1, stderr=str(exc).encode("utf-8"))
+            stderr_text = str(exc)
+            success = False
+            message = f"MySQL backup failed: Compression error: {exc}"
+            logger.error("Compression failed: %s", exc)
 
         finished_at = datetime.now(timezone.utc)
         logger.info("Finished with exit code %s. %s", completed.returncode, message)
@@ -270,6 +284,7 @@ class MySQLBackupEngine(BaseBackupEngine):
 
         return BackupResult(
             success=success,
+            backup_type="mysql",
             profile_id=profile.id,
             profile_name=profile.name,
             started_at=started_at,
@@ -277,5 +292,5 @@ class MySQLBackupEngine(BaseBackupEngine):
             exit_code=completed.returncode,
             message=message,
             log_file=str(log_path),
-            output_file=str(output_path),
+            output_file=str(output_path) if output_path.exists() else None,
         )

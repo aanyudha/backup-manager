@@ -1,5 +1,6 @@
 """Domain models."""
 
+from app.models.backup_metadata import BackupMetadata
 from app.models.profile import (
     BaseProfile,
     FolderBackupProfile,
@@ -13,6 +14,7 @@ from app.models.settings import AppSettings
 
 __all__ = [
     "AppSettings",
+    "BackupMetadata",
     "BackupResult",
     "BaseProfile",
     "FolderBackupProfile",

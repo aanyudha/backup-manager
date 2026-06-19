@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -68,6 +69,11 @@ class FolderProfilesPage(QWidget):
         self.rsync_args_edit = QLineEdit()
         self.enabled_checkbox = QCheckBox("Enabled")
         self.enabled_checkbox.setChecked(True)
+        self.retention_checkbox = QCheckBox("Enable Retention")
+        self.retention_days_spin = QSpinBox()
+        self.retention_days_spin.setRange(0, 36500)
+        self.retention_days_spin.setValue(0)
+        self.retention_days_spin.setEnabled(False)
         self.warning_label = QLabel()
         self.warning_label.setWordWrap(True)
 
@@ -85,6 +91,8 @@ class FolderProfilesPage(QWidget):
         form.addRow("SFTP Remote Path", self.sftp_remote_path_edit)
         form.addRow("Rsync Extra Args", self.rsync_args_edit)
         form.addRow("", self.enabled_checkbox)
+        form.addRow("", self.retention_checkbox)
+        form.addRow("Retention Days", self.retention_days_spin)
         form.addRow("Compatibility", self.warning_label)
 
         button_grid = QGridLayout()
@@ -118,6 +126,7 @@ class FolderProfilesPage(QWidget):
         self.run_button.clicked.connect(self._run_profile)
         self.new_button.clicked.connect(self.clear_form)
         self.engine_combo.currentTextChanged.connect(self._refresh_warning)
+        self.retention_checkbox.toggled.connect(self.retention_days_spin.setEnabled)
         self._refresh_warning()
 
     def set_profiles(self, profiles: list[FolderBackupProfile]) -> None:
@@ -163,6 +172,9 @@ class FolderProfilesPage(QWidget):
         self.sftp_remote_path_edit.clear()
         self.rsync_args_edit.clear()
         self.enabled_checkbox.setChecked(True)
+        self.retention_checkbox.setChecked(False)
+        self.retention_days_spin.setValue(0)
+        self.retention_days_spin.setEnabled(False)
         self.profile_list.clearSelection()
         self._refresh_warning()
 
@@ -189,6 +201,9 @@ class FolderProfilesPage(QWidget):
         self.sftp_remote_path_edit.setText(profile.sftp_remote_path or "")
         self.rsync_args_edit.setText(" ".join(profile.rsync_extra_args))
         self.enabled_checkbox.setChecked(profile.enabled)
+        self.retention_checkbox.setChecked(profile.retention_enabled)
+        self.retention_days_spin.setValue(profile.retention_days or 0)
+        self.retention_days_spin.setEnabled(profile.retention_enabled)
         self._refresh_warning()
 
     def _collect_form_data(self) -> FolderBackupProfile:
@@ -212,6 +227,8 @@ class FolderProfilesPage(QWidget):
             sftp_remote_path=self.sftp_remote_path_edit.text() or None,
             rsync_extra_args=shlex.split(self.rsync_args_edit.text()) if self.rsync_args_edit.text().strip() else [],
             enabled=self.enabled_checkbox.isChecked(),
+            retention_enabled=self.retention_checkbox.isChecked(),
+            retention_days=self.retention_days_spin.value() or None,
             created_at=created_at,
             updated_at=utc_now().astimezone(timezone.utc),
             last_run_at=last_run_at,

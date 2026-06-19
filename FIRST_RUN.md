@@ -41,9 +41,11 @@ python app.py
 2. Fill in the profile name, host, port, username, password, and destination folder.
 3. Optionally set a custom `mysqldump` path if it is not available on `PATH`.
 4. Choose `all`, `single`, or `multiple` for database mode.
-5. Use `Test Connection` to validate the credentials.
-6. Use `Load Database List` to fetch selectable databases.
-7. Click `Save Profile`.
+5. Optionally enable `Compress SQL backup as .sql.gz` for streamed gzip output.
+6. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
+7. Use `Test Connection` to validate the credentials.
+8. Use `Load Database List` to fetch selectable databases.
+9. Click `Save Profile`.
 
 ## How To Create a Folder Profile
 
@@ -54,8 +56,9 @@ python app.py
    - `copy_new_changed`
    - `sync_without_delete`
    - `mirror_with_delete`
-5. Fill SFTP fields only when using an SFTP-based profile.
-6. Click `Validate`, then `Save Profile`.
+5. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
+6. Fill SFTP fields only when using an SFTP-based profile.
+7. Click `Validate`, then `Save Profile`.
 
 ## How To Run a Backup
 
@@ -91,6 +94,12 @@ python app.py
 - Backup logs: `logs/{safe_profile_name}_{YYYYMMDD_HHMMSS}.log`
 - Daily restore logs: `logs/restore_YYYYMMDD.log`
 - Per-run restore logs: `logs/restore_YYYYMMDD_HHMMSS.log`
+
+## Where Backup Verification Is Stored
+
+- Metadata file: `config/backup_metadata.json`
+- SHA256 appears in the metadata file for successful file-based backups.
+- SHA256 and file size are also appended to the backup run log and live output.
 
 ## Known MVP Limitations
 

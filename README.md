@@ -52,7 +52,8 @@ python app.py
 
 - Runtime settings live in `config/settings.json`.
 - Backup profiles live in `config/profiles.json`.
-- Safe starter examples are provided in `config/settings.example.json` and `config/profiles.example.json`.
+- Backup verification metadata lives in `config/backup_metadata.json`.
+- Safe starter examples are provided in `config/settings.example.json`, `config/profiles.example.json`, and `config/backup_metadata.example.json`.
 - Do not commit real local config or credential-bearing profile files.
 
 ## Smoke Check
@@ -89,6 +90,20 @@ python -m pytest -q
 - Per-run restore logs: `logs/restore_YYYYMMDD_HHMMSS.log`
 - Restore history is stored in `config/restore_history.json`
 
+## Backup Metadata File
+
+- File: `config/backup_metadata.json`
+- Default shape:
+
+```json
+{
+  "backups": []
+}
+```
+
+- The runtime file is ignored by git.
+- `config/backup_metadata.example.json` is the committed starter example.
+
 ## Packaging
 
 Windows:
@@ -106,7 +121,7 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - `dist/` output is ignored by git.
 - `build/` and `*.spec` are ignored by git.
 - Local config files may be created during development or packaging checks.
-- Do not commit real `config/profiles.json` or `config/settings.json` files.
+- Do not commit real `config/profiles.json`, `config/settings.json`, `config/restore_history.json`, or `config/backup_metadata.json` files.
 
 ## Windows Notes
 
@@ -125,7 +140,32 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - `mysqldump` commands are built with list arguments for safe subprocess execution.
 - The app supports backing up all databases, a single database, or multiple databases.
 - MySQL passwords are masked in logs and UI output.
-- The MVP keeps the `compress` field for future support, but gzip compression is not enabled yet.
+- MySQL backups can optionally stream directly to `.sql.gz` without first writing a large `.sql` file.
+
+## Compression
+
+- MySQL profiles can enable `Compress SQL backup as .sql.gz`.
+- Compressed output files use the pattern `{safe_profile_name}_{YYYYMMDD_HHMMSS}.sql.gz`.
+- Uncompressed MySQL backups keep the `.sql` output format.
+- Folder backups are not compressed in `v0.2.0`.
+
+## Verification
+
+- Successful file-based backups record SHA256 metadata in `config/backup_metadata.json`.
+- Metadata entries include the profile, output path, SHA256 hash, file size, duration, and result message.
+- SHA256 and file size details are written to the run log and shown in live backup output.
+- Missing or non-file outputs are skipped safely without crashing the backup flow.
+
+Folder backup verification and retention:
+Folder backup outputs are directories. In v0.2.0, SHA256 and retention are applied to file artifacts such as MySQL dump files. Folder backup manifest verification is planned for a later release.
+
+## Retention Policy
+
+- MySQL and folder profiles can enable retention and set `Retention Days`.
+- Retention only deletes files that were previously recorded in `config/backup_metadata.json`.
+- Directory outputs are not hashed or deleted automatically.
+- Unknown files are never scanned or deleted.
+- When retention deletes a file, the metadata entry is kept and marked with `deleted_by_retention` and `deleted_at`.
 
 ## MySQL Restore Notes
 
@@ -170,6 +210,7 @@ For the MVP, passwords may be stored in `config/profiles.json`. This is convenie
 - Password handling is isolated in the backup and connection services.
 - Future work should move credentials to OS keyring or encrypted storage.
 - Do not commit `config/profiles.json` or `config/settings.json`.
+- Do not commit generated backup artifacts such as `.sql` or `.sql.gz` files.
 
 ## Restore MVP Limitations
 

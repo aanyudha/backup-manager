@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 from pathlib import Path
 
@@ -31,6 +32,28 @@ def build_mysql_profile(tmp_path: Path) -> MySQLBackupProfile:
         mysqldump_path=str(fake_dump),
         destination=str(tmp_path / "output"),
     )
+
+
+class FakeStreamingPopen:
+    """Minimal Popen stub for streamed gzip tests."""
+
+    def __init__(self, args: list[str], stdout=None, stderr=None, env=None):  # type: ignore[no-untyped-def]
+        self.args = args
+        self.env = env
+        self.returncode = 0
+        self.stdout = io.BytesIO(b"-- compressed dump --")
+        self.stderr = io.BytesIO(b"")
+        self._killed = False
+
+    def wait(self) -> int:
+        return self.returncode
+
+    def poll(self) -> int | None:
+        return None if not self._killed else self.returncode
+
+    def kill(self) -> None:
+        self._killed = True
+        self.returncode = 1
 
 
 def stub_versions(monkeypatch: pytest.MonkeyPatch, engine: MySQLBackupEngine) -> None:
@@ -181,3 +204,68 @@ def test_unknown_column_statistics_retries_without_option(
     assert "Retrying mysqldump without --column-statistics=0 for compatibility." in log_text
     assert "super-secret" not in log_text
 
+
+def test_compressed_mysql_backup_creates_sql_gz_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compressed backups should stream directly to a .sql.gz artifact."""
+    engine = MySQLBackupEngine(LogService(tmp_path))
+    profile = build_mysql_profile(tmp_path)
+    profile.compress = True
+    stub_versions(monkeypatch, engine)
+
+    monkeypatch.setattr("app.services.compression_service.subprocess.Popen", FakeStreamingPopen)
+
+    result = engine.run(profile)
+
+    assert result.success is True
+    assert result.output_file is not None
+    assert result.output_file.endswith(".sql.gz")
+    assert Path(result.output_file).exists()
+
+
+def test_uncompressed_mysql_backup_keeps_sql_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plain backups should still write .sql files."""
+    engine = MySQLBackupEngine(LogService(tmp_path))
+    profile = build_mysql_profile(tmp_path)
+    stub_versions(monkeypatch, engine)
+
+    def fake_run(args: list[str], stdout=None, stderr=None, env=None, check=False):  # type: ignore[no-untyped-def]
+        stdout.write(b"-- plain dump --")
+        return subprocess.CompletedProcess(args=args, returncode=0, stderr=b"")
+
+    monkeypatch.setattr("app.services.compression_service.subprocess.run", fake_run)
+
+    result = engine.run(profile)
+
+    assert result.success is True
+    assert result.output_file is not None
+    assert result.output_file.endswith(".sql")
+    assert not result.output_file.endswith(".sql.gz")
+
+
+def test_compression_failure_marks_backup_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compression errors should fail the backup run."""
+    engine = MySQLBackupEngine(LogService(tmp_path))
+    profile = build_mysql_profile(tmp_path)
+    profile.compress = True
+    stub_versions(monkeypatch, engine)
+
+    monkeypatch.setattr("app.services.compression_service.subprocess.Popen", FakeStreamingPopen)
+
+    def raise_compression_error(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise OSError("disk full")
+
+    monkeypatch.setattr("app.services.compression_service.gzip.open", raise_compression_error)
+
+    result = engine.run(profile)
+
+    assert result.success is False
+    assert result.message.startswith("MySQL backup failed: Compression error:")

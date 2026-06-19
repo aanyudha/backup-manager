@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -64,7 +65,12 @@ class MySQLProfilesPage(QWidget):
         self.database_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         self.enabled_checkbox = QCheckBox("Enabled")
         self.enabled_checkbox.setChecked(True)
-        self.compress_checkbox = QCheckBox("Keep compress flag enabled for future gzip support")
+        self.compress_checkbox = QCheckBox("Compress SQL backup as .sql.gz")
+        self.retention_checkbox = QCheckBox("Enable Retention")
+        self.retention_days_spin = QSpinBox()
+        self.retention_days_spin.setRange(0, 36500)
+        self.retention_days_spin.setValue(0)
+        self.retention_days_spin.setEnabled(False)
 
         form.addRow("Profile Name", self.name_edit)
         form.addRow("Host", self.host_edit)
@@ -77,6 +83,8 @@ class MySQLProfilesPage(QWidget):
         form.addRow("Database List", self.database_list)
         form.addRow("", self.enabled_checkbox)
         form.addRow("", self.compress_checkbox)
+        form.addRow("", self.retention_checkbox)
+        form.addRow("Retention Days", self.retention_days_spin)
 
         button_grid = QGridLayout()
         self.test_button = QPushButton("Test Connection")
@@ -113,6 +121,7 @@ class MySQLProfilesPage(QWidget):
         self.delete_button.clicked.connect(self._delete_profile)
         self.run_button.clicked.connect(self._run_profile)
         self.new_button.clicked.connect(self.clear_form)
+        self.retention_checkbox.toggled.connect(self.retention_days_spin.setEnabled)
 
     def set_profiles(self, profiles: list[MySQLBackupProfile]) -> None:
         """Load profiles into the page list."""
@@ -157,6 +166,9 @@ class MySQLProfilesPage(QWidget):
         self.database_list.clearSelection()
         self.enabled_checkbox.setChecked(True)
         self.compress_checkbox.setChecked(False)
+        self.retention_checkbox.setChecked(False)
+        self.retention_days_spin.setValue(0)
+        self.retention_days_spin.setEnabled(False)
         self.profile_list.clearSelection()
 
     def _load_selected_profile(self, current: QListWidgetItem | None) -> None:
@@ -178,6 +190,9 @@ class MySQLProfilesPage(QWidget):
         self.database_mode_combo.setCurrentText(profile.database_mode)
         self.enabled_checkbox.setChecked(profile.enabled)
         self.compress_checkbox.setChecked(profile.compress)
+        self.retention_checkbox.setChecked(profile.retention_enabled)
+        self.retention_days_spin.setValue(profile.retention_days or 0)
+        self.retention_days_spin.setEnabled(profile.retention_enabled)
         self._set_database_items(profile.databases, selected=profile.databases)
 
     def _set_database_items(self, items: list[str], selected: list[str] | None = None) -> None:
@@ -207,6 +222,8 @@ class MySQLProfilesPage(QWidget):
             destination=self.destination_edit.text(),
             compress=self.compress_checkbox.isChecked(),
             enabled=self.enabled_checkbox.isChecked(),
+            retention_enabled=self.retention_checkbox.isChecked(),
+            retention_days=self.retention_days_spin.value() or None,
             created_at=created_at,
             updated_at=utc_now().astimezone(timezone.utc),
             last_run_at=last_run_at,

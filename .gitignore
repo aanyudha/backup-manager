@@ -9,7 +9,9 @@ logs/
 config/profiles.json
 config/settings.json
 config/restore_history.json
+config/backup_metadata.json
 *.sql
+*.sql.gz
 *.gz
 .env
 .DS_Store

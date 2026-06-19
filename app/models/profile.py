@@ -21,6 +21,8 @@ class BaseProfile(BaseModel):
     name: str
     type: Literal["mysql", "folder"]
     enabled: bool = True
+    retention_enabled: bool = False
+    retention_days: int | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     last_run_at: datetime | None = None
@@ -35,6 +37,15 @@ class BaseProfile(BaseModel):
         if not cleaned:
             raise ValueError("Profile name is required.")
         return cleaned
+
+    @model_validator(mode="after")
+    def validate_retention_settings(self) -> "BaseProfile":
+        """Require a positive retention window when retention is enabled."""
+        if self.retention_enabled and (self.retention_days is None or self.retention_days <= 0):
+            raise ValueError("Retention days must be greater than 0 when retention is enabled.")
+        if not self.retention_enabled and self.retention_days is not None and self.retention_days <= 0:
+            self.retention_days = None
+        return self
 
 
 class MySQLBackupProfile(BaseProfile):
@@ -131,4 +142,3 @@ def parse_profile(data: dict) -> Profile:
     if profile_type == "folder":
         return FolderBackupProfile.model_validate(data)
     raise ValueError(f"Unsupported profile type: {profile_type!r}")
-

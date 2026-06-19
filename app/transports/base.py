@@ -37,6 +37,7 @@ class BaseTransport(ABC):
         """Create a consistent BackupResult for transport runs."""
         return BackupResult(
             success=success,
+            backup_type="folder",
             profile_id=profile.id,
             profile_name=profile.name,
             started_at=started_at,
@@ -46,4 +47,3 @@ class BaseTransport(ABC):
             log_file=log_file,
             output_file=output_file,
         )
-
