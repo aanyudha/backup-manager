@@ -12,6 +12,7 @@ from app.services.log_service import LogService
 from app.services.mysql_service import MySQLService
 from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
+from app.services.restore_service import RestoreService
 from app.ui.main_window import MainWindow
 
 
@@ -25,10 +26,12 @@ def main() -> int:
     log_service = LogService(path_service.logs_dir())
     mysql_service = MySQLService()
     backup_service = BackupService(repository, platform_service, log_service)
+    restore_service = RestoreService(repository, mysql_service, log_service)
 
     window = MainWindow(
         repository=repository,
         backup_service=backup_service,
+        restore_service=restore_service,
         mysql_service=mysql_service,
         platform_service=platform_service,
         log_service=log_service,

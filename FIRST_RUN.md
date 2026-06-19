@@ -6,6 +6,7 @@
 - `pip`
 - A writable local checkout of the repository
 - For MySQL backups: `mysqldump` installed or available via a configured path
+- For MySQL restores: `mysql` installed or available on `PATH`
 - Optional transport tools:
   - Windows: `robocopy` is built in on supported systems
   - Linux: `rsync` for faster folder syncs
@@ -63,18 +64,38 @@ python app.py
 3. Choose the profile and click `Run Selected` or `Run Backup`.
 4. Watch live output in the dashboard status panel.
 
+## How To Run a Restore
+
+1. Open the `Restore` tab.
+2. For MySQL restore:
+   - Enter the SQL file path.
+   - Enter the target database, host, port, username, and password.
+   - Optionally enter a custom `mysql` client path.
+   - Use `Validate SQL File` and `Test Connection`.
+   - Click `Run Restore`.
+3. For folder restore:
+   - Enter the backup source folder.
+   - Enter the restore destination folder.
+   - Click `Validate`, then `Run Restore`.
+4. Confirm the prompt: `This operation may overwrite existing data. Continue?`
+5. Watch progress in the restore status panel and review entries in `Restore History`.
+
 ## Where Logs Are Stored
 
 - Daily app logs: `logs/app_YYYYMMDD.log`
 - Backup logs: `logs/{safe_profile_name}_{YYYYMMDD_HHMMSS}.log`
+- Daily restore logs: `logs/restore_YYYYMMDD.log`
+- Per-run restore logs: `logs/restore_YYYYMMDD_HHMMSS.log`
 
 ## Known MVP Limitations
 
 - Scheduler is not active yet.
-- Restore is not implemented yet.
 - Cloud backup is not implemented yet.
 - Encryption is not implemented yet.
 - Passwords are stored in JSON for the MVP and must be protected.
 - Users should not commit `config/profiles.json` and `config/settings.json`.
 - SFTP `mirror_with_delete` is not supported in the MVP.
-
+- Restore has no point-in-time recovery.
+- Restore has no incremental restore.
+- Restore has no database diff support.
+- Folder restore has no versioning and does not mirror-delete destination content.

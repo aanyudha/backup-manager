@@ -14,19 +14,25 @@ class LogService:
     def __init__(self, logs_dir: Path) -> None:
         self.logs_dir = logs_dir
         self.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.app_logger = self._build_daily_logger()
+        self.app_logger = self._build_daily_logger("app")
+        self.restore_daily_logger = self._build_daily_logger("restore")
 
-    def _build_daily_logger(self) -> logging.Logger:
-        """Create a daily app logger."""
+    def _logger_name(self, prefix: str) -> str:
+        """Build a path-specific logger name to avoid handler leakage across tests."""
+        suffix = self.safe_name(str(self.logs_dir.resolve()))
+        return f"heisenberg_backup_manager.{prefix}.{suffix}"
+
+    def _build_daily_logger(self, prefix: str) -> logging.Logger:
+        """Create a daily logger for a named subsystem."""
         date_part = datetime.now().strftime("%Y%m%d")
-        log_path = self.logs_dir / f"app_{date_part}.log"
-        logger = logging.getLogger("heisenberg_backup_manager.app")
+        log_path = self.logs_dir / f"{prefix}_{date_part}.log"
+        logger = logging.getLogger(self._logger_name(prefix))
         logger.setLevel(logging.INFO)
         logger.propagate = False
-        if not logger.handlers:
-            handler = logging.FileHandler(log_path, encoding="utf-8")
-            handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-            logger.addHandler(handler)
+        logger.handlers.clear()
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        logger.addHandler(handler)
         return logger
 
     def safe_name(self, value: str) -> str:
@@ -50,6 +56,36 @@ class LogService:
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
         logger.addHandler(handler)
         return logger, log_path
+
+    def restore_daily_log_path(self, started_at: datetime | None = None) -> Path:
+        """Return the daily restore log path."""
+        date_part = (started_at or datetime.now()).strftime("%Y%m%d")
+        return self.logs_dir / f"restore_{date_part}.log"
+
+    def restore_log_path(self, started_at: datetime | None = None) -> Path:
+        """Return a per-run restore log path."""
+        timestamp = (started_at or datetime.now()).strftime("%Y%m%d_%H%M%S")
+        return self.logs_dir / f"restore_{timestamp}.log"
+
+    def create_restore_logger(self, started_at: datetime | None = None) -> tuple[logging.Logger, Path]:
+        """Create a dedicated logger for one restore run and the daily restore log."""
+        started_at = started_at or datetime.now()
+        run_log_path = self.restore_log_path(started_at)
+        daily_log_path = self.restore_daily_log_path(started_at)
+        logger_name = f"heisenberg_backup_manager.restore.{run_log_path.stem}.{self.safe_name(str(self.logs_dir.resolve()))}"
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        logger.handlers.clear()
+
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        run_handler = logging.FileHandler(run_log_path, encoding="utf-8")
+        run_handler.setFormatter(formatter)
+        daily_handler = logging.FileHandler(daily_log_path, encoding="utf-8")
+        daily_handler.setFormatter(formatter)
+        logger.addHandler(run_handler)
+        logger.addHandler(daily_handler)
+        return logger, run_log_path
 
     def log_app(self, message: str) -> None:
         """Write to the daily application log."""

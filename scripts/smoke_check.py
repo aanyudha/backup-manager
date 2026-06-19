@@ -15,6 +15,7 @@ from app.services.log_service import LogService
 from app.services.mysql_service import MySQLService
 from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
+from app.services.restore_service import RestoreService
 from app.ui.main_window import MainWindow
 
 
@@ -29,6 +30,7 @@ def main() -> int:
     repository = ProfileRepository(config_dir)
     mysql_service = MySQLService()
     backup_service = BackupService(repository, platform_service, log_service)
+    restore_service = RestoreService(repository, mysql_service, log_service)
 
     print(f"Detected OS: {platform_service.system_name()}")
     print(f"Available engines: {', '.join(platform_service.get_available_engines())}")
@@ -36,7 +38,7 @@ def main() -> int:
     print(f"Logs directory ready: {logs_dir.exists()} -> {logs_dir}")
 
     # Import-side verification for major desktop modules without starting the UI.
-    _ = backup_service, mysql_service, MainWindow
+    _ = backup_service, restore_service, mysql_service, MainWindow
     print("Core modules imported successfully.")
     return 0
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__all__ = ["BackupService", "LogService", "MySQLService", "PlatformService"]
+__all__ = ["BackupService", "LogService", "MySQLService", "PlatformService", "RestoreService"]
 
 
 def __getattr__(name: str):  # type: ignore[no-untyped-def]
@@ -23,4 +23,8 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from app.services.platform_service import PlatformService
 
         return PlatformService
+    if name == "RestoreService":
+        from app.services.restore_service import RestoreService
+
+        return RestoreService
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

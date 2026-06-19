@@ -8,9 +8,12 @@ Heisenberg Backup Manager is an open-source desktop application for creating reu
 - JSON-backed profile and settings storage for an easy MVP workflow
 - MySQL backup profiles with connection testing and database discovery
 - Folder backup profiles with automatic engine selection
+- MySQL restore support for `.sql` and `.sql.gz` files
+- Folder restore support with overwrite-existing behavior
 - Local copy, `robocopy`, `rsync`, and SFTP transport support
 - Background backup execution with UI-safe worker threads
 - Profile-level logs and daily application logs
+- Restore history with per-run and daily restore logs
 - Test coverage for core repository, platform, and transport behavior
 
 ## Supported OS
@@ -66,6 +69,20 @@ python scripts/smoke_check.py
 python -m pytest -q
 ```
 
+## Restore
+
+- Open the `Restore` tab to access MySQL and folder restore tools.
+- MySQL restore supports `.sql` and `.sql.gz` sources and runs through the `mysql` client.
+- If the MySQL client path is left blank, the app searches `PATH`.
+- Folder restore copies files recursively into the destination and overwrites existing files without deleting extra destination data.
+- Every restore asks for confirmation before it starts: `This operation may overwrite existing data. Continue?`
+
+## Restore Logs
+
+- Daily restore logs: `logs/restore_YYYYMMDD.log`
+- Per-run restore logs: `logs/restore_YYYYMMDD_HHMMSS.log`
+- Restore history is stored in `config/restore_history.json`
+
 ## Packaging
 
 Windows:
@@ -104,12 +121,25 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - MySQL passwords are masked in logs and UI output.
 - The MVP keeps the `compress` field for future support, but gzip compression is not enabled yet.
 
+## MySQL Restore Notes
+
+- Restore commands are built with list arguments and stdin redirection through `subprocess`, not through a shell.
+- MySQL passwords are never written to logs in plaintext.
+- Fatal restore output such as `Access denied`, `Unknown database`, and connection failures is treated as a failed restore.
+- `.sql.gz` files are decompressed to a temporary SQL file before the restore runs.
+
 ## Folder Backup Notes
 
 - `copy_new_changed` copies only new or updated files.
 - `sync_without_delete` keeps destination-only files intact.
 - `mirror_with_delete` deletes destination-only files for supported transports.
 - The local copy transport uses `pathlib`, `os.walk`, and `shutil.copy2`.
+
+## Folder Restore Notes
+
+- The MVP restore mode is overwrite-only.
+- Missing destination folders are created automatically.
+- Existing files are overwritten, but no files or folders are deleted automatically.
 
 ## SFTP Notes
 
@@ -131,6 +161,13 @@ For the MVP, passwords may be stored in `config/profiles.json`. This is convenie
 - Password handling is isolated in the backup and connection services.
 - Future work should move credentials to OS keyring or encrypted storage.
 - Do not commit `config/profiles.json` or `config/settings.json`.
+
+## Restore MVP Limitations
+
+- No point-in-time recovery
+- No incremental restore
+- No database diff
+- No folder versioning
 
 ## License
 

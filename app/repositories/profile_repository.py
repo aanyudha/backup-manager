@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from app.models.profile import Profile, parse_profile
+from app.models.restore_result import RestoreResult
 from app.models.settings import AppSettings
 
 
@@ -17,6 +18,7 @@ class ProfileRepository:
         self.config_dir = config_dir
         self.profiles_path = self.config_dir / "profiles.json"
         self.settings_path = self.config_dir / "settings.json"
+        self.restore_history_path = self.config_dir / "restore_history.json"
         self._ensure_files()
 
     def _ensure_files(self) -> None:
@@ -26,6 +28,8 @@ class ProfileRepository:
             self._atomic_write_json(self.profiles_path, {"profiles": []})
         if not self.settings_path.exists():
             self._atomic_write_json(self.settings_path, AppSettings().model_dump())
+        if not self.restore_history_path.exists():
+            self._atomic_write_json(self.restore_history_path, {"history": []})
 
     def _atomic_write_json(self, path: Path, payload: object) -> None:
         """Write JSON atomically by replacing a temporary file."""
@@ -97,3 +101,17 @@ class ProfileRepository:
         """Persist application settings."""
         self._atomic_write_json(self.settings_path, settings.model_dump())
         return settings
+
+    def list_restore_history(self) -> list[RestoreResult]:
+        """Return persisted restore runs."""
+        data = json.loads(self.restore_history_path.read_text(encoding="utf-8"))
+        items = data.get("history", []) if isinstance(data, dict) else data
+        return [RestoreResult.model_validate(item) for item in items]
+
+    def append_restore_result(self, result: RestoreResult) -> RestoreResult:
+        """Append one restore result to the persisted history."""
+        history = self.list_restore_history()
+        history.append(result)
+        payload = {"history": [entry.model_dump(mode="json") for entry in history]}
+        self._atomic_write_json(self.restore_history_path, payload)
+        return result
