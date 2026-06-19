@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.1] - Unreleased
+
+### Added
+
+- CLI backup execution by profile id or profile name
+- Windows Task Scheduler export command generation
+- Linux cron export generation
+- External scheduler export dialog with saveable script outputs
+
+### Changed
+
+- Folder profile form now scrolls cleanly after scheduler fields were added
+
+### Notes
+
+- External scheduler support is export-only in this phase
+- Exported commands run backup profiles only and never include stored credentials
+
 ## [0.3.0] - Unreleased
 
 ### Added

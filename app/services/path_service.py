@@ -30,11 +30,19 @@ class PathService:
             return self._executable_path.resolve().parent
         return self._source_root
 
+    def executable_path(self) -> Path:
+        """Return the current Python interpreter or frozen executable path."""
+        return self._executable_path.resolve()
+
     def writable_root(self) -> Path:
         """Return where local runtime data should be written."""
         if self.is_frozen():
             return self._working_dir.resolve()
         return self.app_root()
+
+    def app_entry_path(self) -> Path:
+        """Return the `app.py` entrypoint path for source-mode launches."""
+        return self.app_root() / "app.py"
 
     def config_dir(self) -> Path:
         """Return the writable config directory."""
@@ -43,3 +51,7 @@ class PathService:
     def logs_dir(self) -> Path:
         """Return the writable logs directory."""
         return self.writable_root() / "logs"
+
+    def exports_scheduler_dir(self) -> Path:
+        """Return where external scheduler exports should be written."""
+        return self.writable_root() / "exports" / "scheduler"

@@ -6,6 +6,7 @@ dist/
 build/
 *.spec
 logs/
+exports/
 config/profiles.json
 config/settings.json
 config/restore_history.json

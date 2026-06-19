@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QVBoxLayout,
@@ -38,18 +39,24 @@ class FolderProfilesPage(QWidget):
 
     def __init__(self, platform_service: PlatformService) -> None:
         super().__init__()
+        self.setObjectName("folderProfilesPage")
         self.platform_service = platform_service
         self._profiles: dict[str, FolderBackupProfile] = {}
         self._current_id: str | None = None
 
         layout = QVBoxLayout(self)
-        splitter = QSplitter()
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
 
         self.profile_list = QListWidget()
         self.profile_list.currentItemChanged.connect(self._load_selected_profile)
 
         form_container = QWidget()
         form_layout = QVBoxLayout(form_container)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
         form = QFormLayout()
 
         self.name_edit = QLineEdit()
@@ -112,8 +119,12 @@ class FolderProfilesPage(QWidget):
 
         self.status_output = QPlainTextEdit()
         self.status_output.setReadOnly(True)
+        self.status_output.setMinimumHeight(100)
 
-        form_layout.addLayout(form)
+        scroll_layout.addLayout(form)
+        scroll_layout.addStretch(1)
+        scroll_area.setWidget(scroll_content)
+        form_layout.addWidget(scroll_area)
         form_layout.addLayout(button_grid)
         form_layout.addWidget(QLabel("Status"))
         form_layout.addWidget(self.status_output)
@@ -121,6 +132,7 @@ class FolderProfilesPage(QWidget):
         splitter.addWidget(self.profile_list)
         splitter.addWidget(form_container)
         splitter.setStretchFactor(1, 1)
+        splitter.setSizes([220, 680])
         layout.addWidget(splitter)
 
         self.validate_button.clicked.connect(self._validate_profile)

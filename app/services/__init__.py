@@ -4,7 +4,9 @@ from __future__ import annotations
 
 __all__ = [
     "BackupService",
+    "CliBackupService",
     "CompressionService",
+    "ExternalSchedulerService",
     "LogService",
     "MySQLService",
     "PlatformService",
@@ -21,6 +23,10 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from app.services.backup_service import BackupService
 
         return BackupService
+    if name == "CliBackupService":
+        from app.services.cli_backup_service import CliBackupService
+
+        return CliBackupService
     if name == "LogService":
         from app.services.log_service import LogService
 
@@ -41,6 +47,10 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from app.services.retention_service import RetentionService
 
         return RetentionService
+    if name == "ExternalSchedulerService":
+        from app.services.external_scheduler_service import ExternalSchedulerService
+
+        return ExternalSchedulerService
     if name == "SchedulerService":
         from app.services.scheduler_service import SchedulerService
 

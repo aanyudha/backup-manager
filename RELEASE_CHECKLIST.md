@@ -5,6 +5,10 @@
 - [ ] Smoke check passes
 - [ ] UI smoke check passes
 - [ ] Scheduler due calculation tests pass
+- [ ] CLI backup runner works by profile id and profile name
+- [ ] Windows scheduler export command reviewed
+- [ ] Linux cron export reviewed
+- [ ] Exported script files save under `exports/scheduler/`
 - [ ] Scheduler worker smoke path verified
 - [ ] Compressed MySQL backup writes a `.sql.gz` artifact
 - [ ] Backup metadata includes SHA256 and file size
@@ -17,5 +21,6 @@
 - [ ] FIRST_RUN reviewed
 - [ ] CHANGELOG updated
 - [ ] No real credentials in config
+- [ ] No credentials leaked in exported commands
 - [ ] `git status` checked
-- [ ] Tag `v0.3.0` created only after verification
+- [ ] Tag `v0.3.1` created only after verification

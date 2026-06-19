@@ -13,6 +13,7 @@ Heisenberg Backup Manager is an open-source desktop application for creating reu
 - Local copy, `robocopy`, `rsync`, and SFTP transport support
 - Background backup execution with UI-safe worker threads
 - Internal scheduler for daily, weekly, and monthly backup runs
+- External scheduler export for Windows Task Scheduler and Linux cron
 - Profile-level logs and daily application logs
 - Scheduler state tracking for missed-run handling
 - Restore history with per-run and daily restore logs
@@ -73,6 +74,22 @@ python scripts/smoke_check.py
 python -m pytest -q
 ```
 
+## CLI Backup Runner
+
+Run a saved backup profile without opening the desktop UI:
+
+```bash
+python app.py --run-profile-id PROFILE_ID
+python app.py --run-profile-name "Profile Name"
+```
+
+Frozen builds support the same flags:
+
+```bash
+HeisenbergBackupManager.exe --run-profile-id PROFILE_ID
+./heisenberg-backup-manager --run-profile-id PROFILE_ID
+```
+
 ## Restore
 
 - Open the `Restore` tab to access MySQL and folder restore tools.
@@ -96,7 +113,7 @@ python -m pytest -q
 ## Scheduler
 
 - The MVP scheduler is internal only and runs while the desktop app is open.
-- It does not use Windows Task Scheduler, cron, or systemd in `v0.3.0`.
+- It does not install Windows Task Scheduler entries or cron jobs automatically in `v0.3.1`.
 - Supported schedule types are `manual`, `daily`, `weekly`, and `monthly`.
 - `daily` uses a single `HH:MM` time.
 - `weekly` uses `HH:MM` plus one or more weekdays where `0=Monday` through `6=Sunday`.
@@ -104,7 +121,28 @@ python -m pytest -q
 - If a monthly schedule is set past the end of the month, it runs on that month's last day.
 - `Run if missed` lets the app catch up later the same day after the scheduled minute has passed.
 - Use the `Scheduler` tab to review schedule summaries, last run details, next run times, and current status.
+- Use `Export External Schedule` to generate reviewable Windows and Linux commands for manual installation.
 - Use `Settings` to enable `Auto-start scheduler when app opens`.
+
+## External Scheduler Export
+
+- Internal scheduler: runs only while the app is open.
+- External scheduler: lets the OS start one backup profile through the CLI runner.
+- Exported commands do not include stored credentials or passwords.
+- The target machine must have access to `config/profiles.json` and the referenced backup tools.
+- Exports are saved under `exports/scheduler/`.
+
+Windows Task Scheduler example:
+
+```powershell
+schtasks /Create /TN "Heisenberg Backup Manager\Primary_DB" /TR "\"C:\path\HeisenbergBackupManager.exe\" --run-profile-id profile-1" /SC DAILY /ST 10:15 /F
+```
+
+Linux cron example:
+
+```bash
+15 10 * * * /path/to/python /path/to/app.py --run-profile-id profile-1 >> /path/to/logs/cron_Primary_DB.log 2>&1
+```
 
 ## Scheduler Logs
 
@@ -241,6 +279,7 @@ For the MVP, passwords may be stored in `config/profiles.json`. This is convenie
 - Password handling is isolated in the backup and connection services.
 - Future work should move credentials to OS keyring or encrypted storage.
 - Do not commit `config/profiles.json` or `config/settings.json`.
+- Do not commit generated files in `exports/`.
 - Do not commit generated backup artifacts such as `.sql` or `.sql.gz` files.
 
 ## Restore MVP Limitations

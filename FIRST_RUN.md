@@ -92,6 +92,28 @@ python app.py
 5. Use `Stop Scheduler` to end the background loop.
 6. If you want it to start automatically on launch, open `Settings` and enable `Auto-start scheduler when app opens`.
 
+## How To Export an External Schedule
+
+1. Save a profile with `Enable Schedule` turned on and a non-`manual` schedule type.
+2. Open the `Scheduler` tab and select that profile in the table.
+3. Click `Export External Schedule`.
+4. Review the generated Windows `schtasks` command, Linux cron line, and notes.
+5. Use `Copy` or `Save` if you want a reusable command file in `exports/scheduler/`.
+6. Remember that export is review-only in `v0.3.1`; the app does not install tasks for you.
+
+Windows manual install:
+
+1. Export the Windows command.
+2. Open Command Prompt or PowerShell with the permissions you want the task to use.
+3. Review the command carefully, then run it manually.
+
+Linux manual install:
+
+1. Export the Linux cron line.
+2. Review the paths and adapt them for the target Linux machine if needed.
+3. Open `crontab -e` on that machine.
+4. Paste the reviewed line and save.
+
 ## How To Run a Restore
 
 1. Open the `Restore` tab.
@@ -130,8 +152,8 @@ python app.py
 ## Known MVP Limitations
 
 - Scheduler only runs while the desktop app is open.
-- Scheduler does not integrate with Windows Task Scheduler yet.
-- Scheduler does not integrate with cron or systemd yet.
+- Scheduler export does not auto-install Windows Task Scheduler entries.
+- Scheduler export does not auto-edit `crontab`.
 - Cloud backup is not implemented yet.
 - Encryption is not implemented yet.
 - Passwords are stored in JSON for the MVP and must be protected.

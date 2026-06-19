@@ -16,8 +16,10 @@ def test_path_service_uses_source_root_when_not_frozen(tmp_path: Path) -> None:
 
     assert service.is_frozen() is False
     assert service.app_root() == tmp_path
+    assert service.app_entry_path() == tmp_path / "app.py"
     assert service.config_dir() == tmp_path / "config"
     assert service.logs_dir() == tmp_path / "logs"
+    assert service.exports_scheduler_dir() == tmp_path / "exports" / "scheduler"
 
 
 def test_path_service_uses_working_directory_when_frozen(
@@ -38,5 +40,7 @@ def test_path_service_uses_working_directory_when_frozen(
 
     assert service.is_frozen() is True
     assert service.app_root() == executable_dir
+    assert service.executable_path() == executable_dir / "HeisenbergBackupManager.exe"
     assert service.config_dir() == working_dir / "config"
     assert service.logs_dir() == working_dir / "logs"
+    assert service.exports_scheduler_dir() == working_dir / "exports" / "scheduler"

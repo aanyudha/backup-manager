@@ -17,12 +17,15 @@ from app.models.result import BackupResult
 from app.models.settings import AppSettings
 from app.repositories.profile_repository import ProfileRepository
 from app.services.backup_service import BackupService
+from app.services.external_scheduler_service import ExternalSchedulerService
 from app.services.log_service import LogService
 from app.services.mysql_service import MySQLService
+from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
 from app.services.restore_service import RestoreService
 from app.services.scheduler_service import SchedulerService
 from app.ui.dashboard_page import DashboardPage
+from app.ui.external_scheduler_export_dialog import ExternalSchedulerExportDialog
 from app.ui.folder_profiles_page import FolderProfilesPage
 from app.ui.logs_page import LogsPage
 from app.ui.mysql_profiles_page import MySQLProfilesPage
@@ -47,6 +50,8 @@ class MainWindow(QMainWindow):
         mysql_service: MySQLService,
         platform_service: PlatformService,
         log_service: LogService,
+        path_service: PathService,
+        external_scheduler_service: ExternalSchedulerService,
     ) -> None:
         super().__init__()
         self.repository = repository
@@ -56,6 +61,8 @@ class MainWindow(QMainWindow):
         self.mysql_service = mysql_service
         self.platform_service = platform_service
         self.log_service = log_service
+        self.path_service = path_service
+        self.external_scheduler_service = external_scheduler_service
         self.worker_thread: QThread | None = None
         self.worker: object | None = None
         self.scheduler_thread: QThread | None = None
@@ -98,6 +105,7 @@ class MainWindow(QMainWindow):
         self.restore_page.folder_restore_requested.connect(self.run_folder_restore)
         self.scheduler_page.refresh_requested.connect(self.refresh_all)
         self.scheduler_page.run_due_requested.connect(self.run_due_now)
+        self.scheduler_page.export_requested.connect(self.export_external_schedule)
         self.scheduler_page.start_requested.connect(self.start_scheduler)
         self.scheduler_page.stop_requested.connect(self.stop_scheduler)
         self.settings_page.save_requested.connect(self.save_settings)
@@ -382,6 +390,40 @@ class MainWindow(QMainWindow):
             return
         self._start_scheduler_worker(run_once=True)
 
+    def export_external_schedule(self) -> None:
+        """Show export commands for the selected scheduler profile."""
+        profile_id = self.scheduler_page.current_profile_id()
+        if not profile_id:
+            QMessageBox.information(
+                self,
+                "Export External Schedule",
+                "Select a profile in the Scheduler table first.",
+            )
+            return
+
+        profile = self.repository.get_by_id(profile_id)
+        if not profile:
+            QMessageBox.warning(self, "Export External Schedule", "Selected profile was not found.")
+            return
+
+        try:
+            export = self.external_scheduler_service.build_export(
+                profile,
+                self.path_service.executable_path(),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Export External Schedule", str(exc))
+            return
+
+        dialog = ExternalSchedulerExportDialog(profile.name, export)
+        dialog.save_windows_button.clicked.connect(
+            lambda: self._save_windows_export(profile, export.windows_command)
+        )
+        dialog.save_linux_button.clicked.connect(
+            lambda: self._save_linux_export(profile, export.linux_cron)
+        )
+        dialog.exec()
+
     def _start_scheduler_worker(self, *, run_once: bool) -> None:
         """Create and start the scheduler worker thread."""
         self.scheduler_thread = QThread(self)
@@ -432,6 +474,7 @@ class MainWindow(QMainWindow):
             next_run = self.scheduler_service.get_next_run(profile, now)
             rows.append(
                 {
+                    "profile_id": profile.id,
                     "profile_name": profile.name,
                     "type": profile.schedule_type,
                     "schedule_enabled": "Yes" if profile.schedule_enabled else "No",
@@ -503,3 +546,17 @@ class MainWindow(QMainWindow):
         if not value:
             return ""
         return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _save_windows_export(self, profile: Profile, windows_command: str) -> None:
+        """Persist the Windows scheduler export file."""
+        path = self.external_scheduler_service.save_windows_command(profile, windows_command)
+        self.scheduler_page.append_status(f"Saved Windows export: {path}")
+        self.dashboard_page.append_status(f"Saved Windows export for '{profile.name}'.")
+        QMessageBox.information(self, "Export External Schedule", f"Saved Windows export:\n{path}")
+
+    def _save_linux_export(self, profile: Profile, linux_cron: str) -> None:
+        """Persist the Linux cron export file."""
+        path = self.external_scheduler_service.save_linux_cron(profile, linux_cron)
+        self.scheduler_page.append_status(f"Saved Linux export: {path}")
+        self.dashboard_page.append_status(f"Saved Linux export for '{profile.name}'.")
+        QMessageBox.information(self, "Export External Schedule", f"Saved Linux export:\n{path}")
