@@ -1,0 +1,14 @@
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
+*.spec
+logs/
+config/profiles.json
+config/settings.json
+*.sql
+*.gz
+.env
+.DS_Store

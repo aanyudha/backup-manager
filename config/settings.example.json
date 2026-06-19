@@ -1,0 +1,6 @@
+{
+  "default_backup_folder": "",
+  "default_log_folder": "logs",
+  "default_mysqldump_path": ""
+}
+
