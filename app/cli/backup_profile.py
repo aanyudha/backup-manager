@@ -11,6 +11,12 @@ def build_cli_parser() -> argparse.ArgumentParser:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--run-profile-id", dest="run_profile_id", help="Run one backup profile by id.")
     group.add_argument("--run-profile-name", dest="run_profile_name", help="Run one backup profile by name.")
+    group.add_argument(
+        "--scheduler-service",
+        dest="scheduler_service",
+        action="store_true",
+        help="Run the internal scheduler loop without starting the desktop UI.",
+    )
     return parser
 
 

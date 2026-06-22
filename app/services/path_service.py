@@ -55,3 +55,7 @@ class PathService:
     def exports_scheduler_dir(self) -> Path:
         """Return where external scheduler exports should be written."""
         return self.writable_root() / "exports" / "scheduler"
+
+    def exports_service_dir(self) -> Path:
+        """Return where service helper exports should be written."""
+        return self.writable_root() / "exports" / "service"

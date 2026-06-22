@@ -93,9 +93,9 @@ class FolderBackupProfile(BaseProfile):
     """Configuration for folder backups."""
 
     type: Literal["folder"] = "folder"
-    source: str
+    source: str = ""
     destination: str
-    engine: Literal["auto", "local_copy", "robocopy", "rsync", "sftp"] = "auto"
+    engine: Literal["auto", "local_copy", "robocopy", "rsync", "sftp", "ftp"] = "auto"
     mode: Literal["copy_new_changed", "sync_without_delete", "mirror_with_delete"] = (
         "copy_new_changed"
     )
@@ -106,9 +106,15 @@ class FolderBackupProfile(BaseProfile):
     sftp_password: str | None = None
     sftp_private_key: str | None = None
     sftp_remote_path: str | None = None
+    ftp_host: str | None = None
+    ftp_port: int = 21
+    ftp_username: str | None = None
+    ftp_password: str | None = None
+    ftp_remote_path: str | None = None
+    ftp_passive: bool = True
     rsync_extra_args: list[str] = Field(default_factory=list)
 
-    @field_validator("source", "destination")
+    @field_validator("destination")
     @classmethod
     def validate_path_fields(cls, value: str) -> str:
         """Require non-empty path fields."""
@@ -117,7 +123,24 @@ class FolderBackupProfile(BaseProfile):
             raise ValueError("Field cannot be blank.")
         return cleaned
 
-    @field_validator("log_folder", "sftp_host", "sftp_username", "sftp_password", "sftp_private_key", "sftp_remote_path")
+    @field_validator("source")
+    @classmethod
+    def normalize_source_field(cls, value: str) -> str:
+        """Normalize the source field so FTP profiles may leave it blank."""
+        return value.strip()
+
+    @field_validator(
+        "log_folder",
+        "sftp_host",
+        "sftp_username",
+        "sftp_password",
+        "sftp_private_key",
+        "sftp_remote_path",
+        "ftp_host",
+        "ftp_username",
+        "ftp_password",
+        "ftp_remote_path",
+    )
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         """Normalize optional strings."""
@@ -131,6 +154,22 @@ class FolderBackupProfile(BaseProfile):
     def normalize_rsync_args(cls, value: list[str]) -> list[str]:
         """Trim rsync extra arguments."""
         return [item.strip() for item in value if item.strip()]
+
+    @model_validator(mode="after")
+    def validate_transport_fields(self) -> "FolderBackupProfile":
+        """Validate engine-specific fields without forcing the UI to over-specialize."""
+        if self.engine != "ftp" and not self.source:
+            raise ValueError("Source is required unless the FTP engine is selected.")
+        if self.engine == "ftp":
+            if not self.ftp_host:
+                raise ValueError("FTP host is required when engine=ftp.")
+            if self.ftp_port <= 0:
+                raise ValueError("FTP port must be greater than 0.")
+            if not self.ftp_username:
+                raise ValueError("FTP username is required when engine=ftp.")
+            if not self.ftp_remote_path:
+                raise ValueError("FTP remote path is required when engine=ftp.")
+        return self
 
 
 Profile: TypeAlias = MySQLBackupProfile | FolderBackupProfile

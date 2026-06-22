@@ -69,7 +69,14 @@ python app.py
    - `External OS Scheduler` if Windows Task Scheduler or Linux cron should run the backup.
 8. Choose the schedule type, and fill the matching time, weekday, or day-of-month fields.
 9. Fill SFTP fields only when using an SFTP-based profile.
-10. Click `Validate`, then `Save Profile`.
+10. Fill FTP fields only when using an FTP-based profile.
+11. For FTP in this MVP:
+   - Use a local destination folder.
+   - Set `FTP Remote Path` to the remote source folder.
+   - Use `copy_new_changed` or `sync_without_delete`.
+   - Do not use `mirror_with_delete`.
+12. Prefer SFTP over FTP when the server supports it.
+13. Click `Validate`, then `Save Profile`.
 
 ## How To Run a Backup
 
@@ -114,6 +121,16 @@ python app.py
 6. If you change the profile schedule later, export again so the OS scheduler matches the profile.
 7. Use `Copy` or `Save` if you want reusable files in `exports/scheduler/`.
 8. Remember that export is review-only in `v0.3.1`; the app does not install tasks for you.
+
+## How To Export Service Mode Helpers
+
+1. Open the `Settings` tab.
+2. Optionally enable `Run as Service / Background Scheduler Mode`.
+3. Leave `Service Runner Mode` on `Internal Scheduler Service` if you want the `--scheduler-service` loop.
+4. Click `Export Windows Service Task` to generate review-only Task Scheduler helper files in `exports/service/`.
+5. Click `Export Linux systemd Service` to generate a review-only systemd unit and install script in `exports/service/`.
+6. Review the generated files before running any privileged OS commands.
+7. The app does not run `schtasks`, `systemctl`, or any install script automatically.
 
 Windows manual install:
 
@@ -181,10 +198,13 @@ python -m PyInstaller --noconfirm --windowed --name HeisenbergBackupManager app.
 - Internal scheduler only runs while the desktop app is open.
 - Scheduler export does not auto-install Windows Task Scheduler entries.
 - Scheduler export does not auto-edit `crontab`.
+- Service helper export does not auto-install Windows Task Scheduler startup entries.
+- Service helper export does not auto-install Linux systemd units.
 - Cloud backup is not implemented yet.
 - Encryption is not implemented yet.
 - Passwords are stored in JSON for the MVP and must be protected.
 - Users should not commit `config/profiles.json` and `config/settings.json`.
+- FTP `mirror_with_delete` is not supported in the MVP.
 - SFTP `mirror_with_delete` is not supported in the MVP.
 - Restore has no point-in-time recovery.
 - Restore has no incremental restore.

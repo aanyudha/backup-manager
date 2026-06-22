@@ -63,7 +63,7 @@ class FolderProfilesPage(QWidget):
         self.source_edit = QLineEdit()
         self.destination_edit = QLineEdit()
         self.engine_combo = QComboBox()
-        self.engine_combo.addItems(["auto", "local_copy", "robocopy", "rsync", "sftp"])
+        self.engine_combo.addItems(["auto", "local_copy", "robocopy", "rsync", "sftp", "ftp"])
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["copy_new_changed", "sync_without_delete", "mirror_with_delete"])
         self.log_folder_edit = QLineEdit()
@@ -74,6 +74,14 @@ class FolderProfilesPage(QWidget):
         self.sftp_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.sftp_private_key_edit = QLineEdit()
         self.sftp_remote_path_edit = QLineEdit()
+        self.ftp_host_edit = QLineEdit()
+        self.ftp_port_edit = QLineEdit("21")
+        self.ftp_username_edit = QLineEdit()
+        self.ftp_password_edit = QLineEdit()
+        self.ftp_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ftp_remote_path_edit = QLineEdit()
+        self.ftp_passive_checkbox = QCheckBox("Use Passive Mode")
+        self.ftp_passive_checkbox.setChecked(True)
         self.rsync_args_edit = QLineEdit()
         self.enabled_checkbox = QCheckBox("Enabled")
         self.enabled_checkbox.setChecked(True)
@@ -92,12 +100,20 @@ class FolderProfilesPage(QWidget):
         form.addRow("Engine", self.engine_combo)
         form.addRow("Mode", self.mode_combo)
         form.addRow("Log Folder", self.log_folder_edit)
+        form.addRow(QLabel("SFTP Settings"))
         form.addRow("SFTP Host", self.sftp_host_edit)
         form.addRow("SFTP Port", self.sftp_port_edit)
         form.addRow("SFTP Username", self.sftp_username_edit)
         form.addRow("SFTP Password", self.sftp_password_edit)
         form.addRow("SFTP Private Key", self.sftp_private_key_edit)
         form.addRow("SFTP Remote Path", self.sftp_remote_path_edit)
+        form.addRow(QLabel("FTP Settings (less secure than SFTP; remote-to-local only in MVP)"))
+        form.addRow("FTP Host", self.ftp_host_edit)
+        form.addRow("FTP Port", self.ftp_port_edit)
+        form.addRow("FTP Username", self.ftp_username_edit)
+        form.addRow("FTP Password", self.ftp_password_edit)
+        form.addRow("FTP Remote Path", self.ftp_remote_path_edit)
+        form.addRow("", self.ftp_passive_checkbox)
         form.addRow("Rsync Extra Args", self.rsync_args_edit)
         form.addRow("", self.enabled_checkbox)
         form.addRow("", self.retention_checkbox)
@@ -185,6 +201,12 @@ class FolderProfilesPage(QWidget):
         self.sftp_password_edit.clear()
         self.sftp_private_key_edit.clear()
         self.sftp_remote_path_edit.clear()
+        self.ftp_host_edit.clear()
+        self.ftp_port_edit.setText("21")
+        self.ftp_username_edit.clear()
+        self.ftp_password_edit.clear()
+        self.ftp_remote_path_edit.clear()
+        self.ftp_passive_checkbox.setChecked(True)
         self.rsync_args_edit.clear()
         self.enabled_checkbox.setChecked(True)
         self.retention_checkbox.setChecked(False)
@@ -215,6 +237,12 @@ class FolderProfilesPage(QWidget):
         self.sftp_password_edit.setText(profile.sftp_password or "")
         self.sftp_private_key_edit.setText(profile.sftp_private_key or "")
         self.sftp_remote_path_edit.setText(profile.sftp_remote_path or "")
+        self.ftp_host_edit.setText(profile.ftp_host or "")
+        self.ftp_port_edit.setText(str(profile.ftp_port or 21))
+        self.ftp_username_edit.setText(profile.ftp_username or "")
+        self.ftp_password_edit.setText(profile.ftp_password or "")
+        self.ftp_remote_path_edit.setText(profile.ftp_remote_path or "")
+        self.ftp_passive_checkbox.setChecked(profile.ftp_passive)
         self.rsync_args_edit.setText(" ".join(profile.rsync_extra_args))
         self.enabled_checkbox.setChecked(profile.enabled)
         self.retention_checkbox.setChecked(profile.retention_enabled)
@@ -242,6 +270,12 @@ class FolderProfilesPage(QWidget):
             sftp_password=self.sftp_password_edit.text() or None,
             sftp_private_key=self.sftp_private_key_edit.text() or None,
             sftp_remote_path=self.sftp_remote_path_edit.text() or None,
+            ftp_host=self.ftp_host_edit.text() or None,
+            ftp_port=int(self.ftp_port_edit.text() or "21"),
+            ftp_username=self.ftp_username_edit.text() or None,
+            ftp_password=self.ftp_password_edit.text() or None,
+            ftp_remote_path=self.ftp_remote_path_edit.text() or None,
+            ftp_passive=self.ftp_passive_checkbox.isChecked(),
             rsync_extra_args=shlex.split(self.rsync_args_edit.text()) if self.rsync_args_edit.text().strip() else [],
             enabled=self.enabled_checkbox.isChecked(),
             retention_enabled=self.retention_checkbox.isChecked(),
@@ -264,6 +298,8 @@ class FolderProfilesPage(QWidget):
             warnings.append("Selected engine is not compatible with this OS.")
         if engine == "sftp" and self.mode_combo.currentText() == "mirror_with_delete":
             warnings.append("SFTP mirror_with_delete is unsupported in the MVP.")
+        if engine == "ftp" and self.mode_combo.currentText() == "mirror_with_delete":
+            warnings.append("FTP mirror_with_delete is unsupported in the MVP.")
         self.warning_label.setText(" | ".join(warnings) if warnings else "No compatibility warnings.")
 
     def _validate_profile(self) -> None:

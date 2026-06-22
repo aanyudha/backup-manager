@@ -17,6 +17,7 @@ from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
 from app.services.restore_service import RestoreService
 from app.services.scheduler_service import SchedulerService
+from app.services.scheduler_service_runner import SchedulerServiceRunner
 
 
 def build_runtime_services(path_service: PathService) -> dict[str, object]:
@@ -60,6 +61,25 @@ def run_cli_mode(*, run_profile_id: str | None, run_profile_name: str | None) ->
     return exit_code
 
 
+def run_scheduler_service_mode() -> int:
+    """Run the internal scheduler loop without starting Qt."""
+    services = build_runtime_services(PathService())
+    settings = services["repository"].load_settings()
+    if settings.service_runner_mode != "internal_scheduler":
+        print(
+            "Service Runner Mode is set to External OS Scheduler; "
+            "--scheduler-service will still run the internal scheduler loop for internal profiles only."
+        )
+
+    runner = SchedulerServiceRunner(
+        services["backup_service"],
+        services["scheduler_service"],
+        services["log_service"],
+    )
+    runner.run_forever()
+    return 0
+
+
 def start_desktop_app() -> int:
     """Start the desktop application."""
     from PySide6.QtWidgets import QApplication
@@ -87,6 +107,8 @@ def start_desktop_app() -> int:
 def main(argv: list[str] | None = None) -> int:
     """Dispatch CLI mode or start the desktop UI."""
     args = parse_cli_args(argv)
+    if args.scheduler_service:
+        return run_scheduler_service_mode()
     if args.run_profile_id or args.run_profile_name:
         return run_cli_mode(
             run_profile_id=args.run_profile_id,

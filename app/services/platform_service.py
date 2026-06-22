@@ -33,6 +33,7 @@ class PlatformService:
         if self.command_exists("rsync"):
             engines.append("rsync")
         engines.append("sftp")
+        engines.append("ftp")
         return engines
 
     def compatibility_warnings(self) -> list[str]:
@@ -43,4 +44,3 @@ class PlatformService:
         if not self.command_exists("rsync"):
             warnings.append("rsync is not installed; auto mode may fall back to local copy.")
         return warnings
-

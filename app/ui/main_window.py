@@ -24,6 +24,7 @@ from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
 from app.services.restore_service import RestoreService
 from app.services.scheduler_service import SchedulerService
+from app.services.service_mode_export_service import ServiceModeExportService
 from app.ui.dashboard_page import DashboardPage
 from app.ui.external_scheduler_export_dialog import ExternalSchedulerExportDialog
 from app.ui.folder_profiles_page import FolderProfilesPage
@@ -63,6 +64,11 @@ class MainWindow(QMainWindow):
         self.log_service = log_service
         self.path_service = path_service
         self.external_scheduler_service = external_scheduler_service
+        self.service_mode_export_service = ServiceModeExportService(
+            app_script_path=None if path_service.is_frozen() else path_service.app_entry_path(),
+            working_directory=path_service.app_root(),
+            exports_dir=path_service.exports_service_dir(),
+        )
         self.worker_thread: QThread | None = None
         self.worker: object | None = None
         self.scheduler_thread: QThread | None = None
@@ -109,6 +115,8 @@ class MainWindow(QMainWindow):
         self.scheduler_page.start_requested.connect(self.start_scheduler)
         self.scheduler_page.stop_requested.connect(self.stop_scheduler)
         self.settings_page.save_requested.connect(self.save_settings)
+        self.settings_page.export_windows_service_requested.connect(self.export_windows_service)
+        self.settings_page.export_linux_service_requested.connect(self.export_linux_service)
 
         self.refresh_all()
         if self.settings_page.auto_start_scheduler_checkbox.isChecked():
@@ -576,3 +584,19 @@ class MainWindow(QMainWindow):
         self.scheduler_page.append_status(f"Saved Linux exports:\n{joined_paths}")
         self.dashboard_page.append_status(f"Saved Linux export for '{profile.name}'.")
         QMessageBox.information(self, "Export External Schedule", f"Saved Linux exports:\n{joined_paths}")
+
+    def export_windows_service(self) -> None:
+        """Persist Windows service helper files."""
+        paths = self.service_mode_export_service.save_windows_exports(self.path_service.executable_path())
+        joined_paths = "\n".join(str(path) for path in paths)
+        self.settings_page.set_status("Windows service helper files exported.")
+        self.dashboard_page.append_status("Saved Windows service helper exports.")
+        QMessageBox.information(self, "Export Windows Service Task", f"Saved files:\n{joined_paths}")
+
+    def export_linux_service(self) -> None:
+        """Persist Linux service helper files."""
+        paths = self.service_mode_export_service.save_linux_exports(self.path_service.executable_path())
+        joined_paths = "\n".join(str(path) for path in paths)
+        self.settings_page.set_status("Linux service helper files exported.")
+        self.dashboard_page.append_status("Saved Linux service helper exports.")
+        QMessageBox.information(self, "Export Linux systemd Service", f"Saved files:\n{joined_paths}")

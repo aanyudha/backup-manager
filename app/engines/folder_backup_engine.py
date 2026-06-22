@@ -9,6 +9,7 @@ from app.models.profile import FolderBackupProfile
 from app.models.result import BackupResult
 from app.services.log_service import LogService
 from app.services.platform_service import PlatformService
+from app.transports.ftp_transport import FtpTransport
 from app.transports.local_copy_transport import LocalCopyTransport
 from app.transports.robocopy_transport import RobocopyTransport
 from app.transports.rsync_transport import RsyncTransport
@@ -57,6 +58,8 @@ class FolderBackupEngine(BaseBackupEngine):
                 Path(profile.destination).expanduser().mkdir(parents=True, exist_ok=True)
         elif engine == "sftp":
             Path(profile.destination).expanduser().mkdir(parents=True, exist_ok=True)
+        elif engine == "ftp":
+            Path(profile.destination).expanduser().mkdir(parents=True, exist_ok=True)
 
     def run(
         self,
@@ -78,5 +81,6 @@ class FolderBackupEngine(BaseBackupEngine):
             return RsyncTransport(self.log_service, self.platform_service).run(profile, progress)
         if selected_engine == "sftp":
             return SftpTransport(self.log_service).run(profile, progress)
+        if selected_engine == "ftp":
+            return FtpTransport(self.log_service).run(profile, progress)
         raise RuntimeError(f"Unsupported folder engine: {selected_engine}")
-

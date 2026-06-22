@@ -64,7 +64,6 @@ class MySQLProfilesPage(QWidget):
         self.database_mode_combo.addItems(["all", "single", "multiple"])
         self.database_list = QListWidget()
         self.database_list.setObjectName("databaseListWidget")
-        self.database_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         self.database_list.setMinimumHeight(180)
         self.database_list.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -208,7 +207,7 @@ class MySQLProfilesPage(QWidget):
         self.mysqldump_path_edit.clear()
         self.destination_edit.clear()
         self.database_mode_combo.setCurrentText("all")
-        self.database_list.clearSelection()
+        self.database_list.clear()
         self.enabled_checkbox.setChecked(True)
         self.compress_checkbox.setChecked(False)
         self.retention_checkbox.setChecked(False)
@@ -240,18 +239,62 @@ class MySQLProfilesPage(QWidget):
         self.retention_days_spin.setValue(profile.retention_days or 0)
         self.retention_days_spin.setEnabled(profile.retention_enabled)
         self.schedule_fields.load_profile(profile)
-        self._set_database_items(profile.databases, selected=profile.databases)
+        self.restore_saved_database_selection(profile)
 
-    def _set_database_items(self, items: list[str], selected: list[str] | None = None) -> None:
+    def populate_database_list(self, databases: list[str], selected_databases: list[str]) -> None:
+        """Merge the loaded list with saved selections so edits do not discard choices."""
         self.database_list.clear()
-        selected_values = set(selected or [])
-        for database in items:
-            item = QListWidgetItem(database)
-            item.setSelected(database in selected_values)
+        ordered_selected = [database for database in dict.fromkeys(selected_databases) if database.strip()]
+        mode = self.database_mode_combo.currentText()
+        if mode == "all":
+            ordered_selected = []
+        elif mode == "single":
+            ordered_selected = ordered_selected[:1]
+            if not ordered_selected and databases:
+                ordered_selected = [databases[0]]
+
+        seen: set[str] = set()
+        for database in databases:
+            clean_name = database.strip()
+            if not clean_name or clean_name in seen:
+                continue
+            seen.add(clean_name)
+            item = QListWidgetItem(clean_name)
+            item.setData(Qt.ItemDataRole.UserRole, clean_name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked if clean_name in ordered_selected else Qt.CheckState.Unchecked
+            )
             self.database_list.addItem(item)
 
+        for database in ordered_selected:
+            if database in seen:
+                continue
+            item = QListWidgetItem(f"{database} (saved, not found)")
+            item.setData(Qt.ItemDataRole.UserRole, database)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            self.database_list.addItem(item)
+
+    def get_selected_databases(self) -> list[str]:
+        """Return raw database names from the current selection."""
+        selected: list[str] = []
+        for index in range(self.database_list.count()):
+            item = self.database_list.item(index)
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+            value = item.data(Qt.ItemDataRole.UserRole) or item.text()
+            if isinstance(value, str) and value.strip():
+                selected.append(value.strip())
+        return selected
+
+    def restore_saved_database_selection(self, profile: MySQLBackupProfile) -> None:
+        """Restore database mode and saved selections when a profile is loaded."""
+        self.database_mode_combo.setCurrentText(profile.database_mode)
+        self.populate_database_list(profile.databases, profile.databases)
+
     def _collect_form_data(self) -> MySQLBackupProfile:
-        selected_databases = [item.text() for item in self.database_list.selectedItems()]
+        selected_databases = self.get_selected_databases()
         existing = self._profiles.get(self._current_id or "")
         created_at = existing.created_at if existing else utc_now()
         last_run_at = existing.last_run_at if existing else None
@@ -308,7 +351,9 @@ class MySQLProfilesPage(QWidget):
             QMessageBox.warning(self, "Load Database List", str(exc))
             return
 
-        self._set_database_items(databases, selected=databases[:1] if self.database_mode_combo.currentText() == "single" else [])
+        existing = self._profiles.get(self._current_id or "")
+        saved_selected = self.get_selected_databases() or (existing.databases if existing else [])
+        self.populate_database_list(databases, saved_selected)
         self.append_status(f"Loaded {len(databases)} database(s).")
 
     def _save_profile(self) -> None:

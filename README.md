@@ -10,7 +10,7 @@ Heisenberg Backup Manager is an open-source desktop application for creating reu
 - Folder backup profiles with automatic engine selection
 - MySQL restore support for `.sql` and `.sql.gz` files
 - Folder restore support with overwrite-existing behavior
-- Local copy, `robocopy`, `rsync`, and SFTP transport support
+- Local copy, `robocopy`, `rsync`, SFTP, and FTP transport support
 - Background backup execution with UI-safe worker threads
 - Internal scheduler for daily, weekly, and monthly backup runs
 - External scheduler export for Windows Task Scheduler and Linux cron
@@ -90,6 +90,14 @@ HeisenbergBackupManager.exe --run-profile-id PROFILE_ID
 ./heisenberg-backup-manager --run-profile-id PROFILE_ID
 ```
 
+Run the internal scheduler service loop without opening the desktop UI:
+
+```bash
+python app.py --scheduler-service
+HeisenbergBackupManager.exe --scheduler-service
+./heisenberg-backup-manager --scheduler-service
+```
+
 ## Restore
 
 - Open the `Restore` tab to access MySQL and folder restore tools.
@@ -128,6 +136,28 @@ HeisenbergBackupManager.exe --run-profile-id PROFILE_ID
 - For external profiles, the app shows `Managed by OS scheduler` instead of an internal next-run timestamp.
 - Use `Export External Schedule` to generate reviewable Windows and Linux commands for manual installation.
 - Use `Settings` to enable `Auto-start scheduler when app opens`.
+
+## Service Mode
+
+- Service mode is helper/export based in this release. The app does not install privileged services automatically.
+- `Run as Service / Background Scheduler Mode` is a settings flag that records intent for background scheduling.
+- `Service Runner Mode` supports:
+  - `Internal Scheduler Service` for the `--scheduler-service` loop.
+  - `External OS Scheduler` when you prefer per-profile Windows Task Scheduler or cron exports.
+- `--scheduler-service` runs only scheduled backup profiles whose `Schedule Runner` is `Internal Scheduler`.
+- Restore operations are never started by service mode.
+- Service helper exports are saved under `exports/service/`.
+- Profile credentials remain in local config files and should be protected.
+
+Windows service helper export:
+
+- Generates `windows_scheduler_service_task.cmd` with an `ONSTART` Task Scheduler command.
+- Generates `windows_scheduler_service_run_now.cmd` for manual review/testing.
+
+Linux service helper export:
+
+- Generates `heisenberg-backup-manager.service`.
+- Generates `install_linux_service.sh` with review-only `systemctl` commands.
 
 ## External Scheduler Export
 
@@ -275,6 +305,14 @@ Folder backup outputs are directories. In v0.2.0, SHA256 and retention are appli
 - `sync_without_delete` keeps destination-only files intact.
 - `mirror_with_delete` deletes destination-only files for supported transports.
 - The local copy transport uses `pathlib`, `os.walk`, and `shutil.copy2`.
+
+## FTP Notes
+
+- FTP support in this MVP is remote source to local destination only.
+- FTP downloads new or changed files recursively and preserves the remote directory structure.
+- `mirror_with_delete` is intentionally unsupported for FTP in the MVP.
+- FTP is less secure than SFTP and should be used only when SFTP is unavailable.
+- SFTP is the recommended remote transport when available.
 
 ## Folder Restore Notes
 

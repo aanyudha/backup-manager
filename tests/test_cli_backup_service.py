@@ -91,6 +91,24 @@ def test_app_cli_args_route_without_starting_ui(monkeypatch) -> None:
     assert called == {"profile_id": "profile-1", "profile_name": None}
 
 
+def test_scheduler_service_cli_arg_routes_without_starting_ui(monkeypatch) -> None:
+    """Scheduler service mode should skip the desktop UI."""
+    called: dict[str, bool] = {"service": False}
+
+    def fake_run_scheduler_service_mode() -> int:
+        called["service"] = True
+        return 0
+
+    def fail_desktop_start() -> int:
+        raise AssertionError("Desktop UI should not start in scheduler service mode.")
+
+    monkeypatch.setattr(app_entry, "run_scheduler_service_mode", fake_run_scheduler_service_mode)
+    monkeypatch.setattr(app_entry, "start_desktop_app", fail_desktop_start)
+
+    assert app_entry.main(["--scheduler-service"]) == 0
+    assert called["service"] is True
+
+
 def test_cli_missing_profile_returns_non_zero() -> None:
     """Lookup failures should produce a non-zero exit code."""
     service = CliBackupService(StubBackupService(error=KeyError("Profile missing")))
