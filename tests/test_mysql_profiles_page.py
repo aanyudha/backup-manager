@@ -133,3 +133,40 @@ def test_collect_form_data_persists_network_destination_type() -> None:
 
     page.close()
     app.quit()
+
+
+def test_mysql_test_destination_calls_validation_only(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    page = MySQLProfilesPage(StubMySQLService())
+    page.destination_type_combo.setCurrentIndex(1)
+    page.destination_edit.setText(r"\\server\share\backup")
+    calls: list[tuple[str, str]] = []
+    dialogs: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        page.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (calls.append((path, destination_type)) or True, ""),
+    )
+    monkeypatch.setattr(
+        page.mysql_service,
+        "test_connection",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("connection test should not run")),
+    )
+    monkeypatch.setattr(
+        "app.ui.mysql_profiles_page.QMessageBox.information",
+        lambda *args: dialogs.append(("info", str(args[-1]))),
+    )
+    monkeypatch.setattr(
+        "app.ui.mysql_profiles_page.QMessageBox.warning",
+        lambda *args: dialogs.append(("warn", str(args[-1]))),
+    )
+
+    page._test_destination()
+
+    assert calls == [(r"\\server\share\backup", "network")]
+    assert dialogs and dialogs[0][0] == "info"
+    assert "Destination validation passed" in dialogs[0][1]
+
+    page.close()
+    app.quit()

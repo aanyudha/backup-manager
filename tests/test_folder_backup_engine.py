@@ -236,6 +236,40 @@ def test_ftp_run_uses_ftp_remote_path_not_source(tmp_path: Path, monkeypatch: py
     assert captured["local_root"] == destination
 
 
+def test_ftp_destination_validation_happens_before_transport_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = build_engine(tmp_path)
+    profile = build_profile(
+        tmp_path,
+        source="",
+        source_type="ftp",
+        destination_type="network",
+        destination=r"\\server\share\backup",
+        ftp_host="ftp.example.com",
+        ftp_username="backup",
+        ftp_password="secret",
+        ftp_remote_path="/exports",
+    )
+    call_order: list[str] = []
+
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (call_order.append("validate") or False, "destination blocked"),
+    )
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.FtpTransport.run",
+        lambda self, current_profile, progress=None: (call_order.append("transport") or build_result(current_profile)),
+    )
+
+    with pytest.raises(RuntimeError, match="destination blocked"):
+        engine.run(profile)
+
+    assert call_order == ["validate"]
+
+
 def test_auto_logs_requested_and_resolved_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     engine, _ = build_engine(tmp_path)
     profile = build_profile(tmp_path)

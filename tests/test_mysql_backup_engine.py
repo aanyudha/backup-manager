@@ -297,9 +297,18 @@ def test_mysql_backup_fails_early_if_destination_is_unwritable(
         "validate_destination_path",
         lambda path, destination_type: (
             False,
-            f"Destination folder is not accessible or writable: {path}",
+            (
+                "Destination validation failed:\n"
+                f"Path: {path}\n"
+                "Exists: false\n"
+                "Is Dir: false\n"
+                "Create Folder: failed\n"
+                "Write Test: skipped\n"
+                "Delete Test: skipped\n"
+                "Exception: OSError: blocked"
+            ),
         ),
     )
 
-    with pytest.raises(RuntimeError, match="Destination folder is not accessible or writable"):
+    with pytest.raises(RuntimeError, match="Destination validation failed:"):
         engine.run(profile)

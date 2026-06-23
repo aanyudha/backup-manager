@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from app.models.profile import MySQLBackupProfile, utc_now
 from app.services.mysql_service import MySQLService
+from app.services.path_validation_service import PathValidationService
 from app.ui.schedule_fields_widget import ScheduleFieldsSection
 
 
@@ -44,6 +45,7 @@ class MySQLProfilesPage(QWidget):
         super().__init__()
         self.setObjectName("mysqlProfilesPage")
         self.mysql_service = mysql_service
+        self.path_validation_service = PathValidationService()
         self._profiles: dict[str, MySQLBackupProfile] = {}
         self._current_id: str | None = None
 
@@ -94,6 +96,7 @@ class MySQLProfilesPage(QWidget):
 
         button_grid = QGridLayout()
         self.test_button = QPushButton("Test Connection")
+        self.test_destination_button = QPushButton("Test Destination")
         self.load_databases_button = QPushButton("Load Database List")
         self.save_button = QPushButton("Save Profile")
         self.delete_button = QPushButton("Delete Profile")
@@ -101,10 +104,11 @@ class MySQLProfilesPage(QWidget):
         self.new_button = QPushButton("New Profile")
 
         button_grid.addWidget(self.test_button, 0, 0)
-        button_grid.addWidget(self.save_button, 0, 1)
+        button_grid.addWidget(self.test_destination_button, 0, 1)
+        button_grid.addWidget(self.save_button, 0, 2)
         button_grid.addWidget(self.delete_button, 1, 0)
         button_grid.addWidget(self.run_button, 1, 1)
-        button_grid.addWidget(self.new_button, 2, 0, 1, 2)
+        button_grid.addWidget(self.new_button, 1, 2)
 
         self.status_output = QPlainTextEdit()
         self.status_output.setReadOnly(True)
@@ -179,6 +183,7 @@ class MySQLProfilesPage(QWidget):
         main_layout.addWidget(splitter)
 
         self.test_button.clicked.connect(self._test_connection)
+        self.test_destination_button.clicked.connect(self._test_destination)
         self.load_databases_button.clicked.connect(self._load_databases)
         self.save_button.clicked.connect(self._save_profile)
         self.delete_button.clicked.connect(self._delete_profile)
@@ -393,6 +398,19 @@ class MySQLProfilesPage(QWidget):
         self.append_status(message)
         if not success:
             QMessageBox.warning(self, "MySQL Connection", message)
+
+    def _test_destination(self) -> None:
+        valid, message = self.path_validation_service.validate_destination_path(
+            self.destination_edit.text(),
+            self._current_combo_value(self.destination_type_combo),
+        )
+        if valid:
+            success_message = f"Destination validation passed: {self.destination_edit.text().strip()}"
+            self.append_status(success_message)
+            QMessageBox.information(self, "Test Destination", success_message)
+            return
+        self.append_status(message)
+        QMessageBox.warning(self, "Test Destination", message)
 
     def _load_databases(self) -> None:
         try:

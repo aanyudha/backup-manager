@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from app.engines.folder_backup_engine import FolderBackupEngine
 from app.models.profile import FolderBackupProfile, utc_now
+from app.services.path_validation_service import PathValidationService
 from app.services.platform_service import PlatformService
 from app.services.remote_browser_service import RemoteBrowserService
 from app.ui.remote_folder_browser_dialog import RemoteFolderBrowserDialog
@@ -52,6 +53,7 @@ class FolderProfilesPage(QWidget):
         self.setObjectName("folderProfilesPage")
         self.platform_service = platform_service
         self.remote_browser_service = remote_browser_service
+        self.path_validation_service = PathValidationService()
         self._profiles: dict[str, FolderBackupProfile] = {}
         self._current_id: str | None = None
 
@@ -199,15 +201,17 @@ class FolderProfilesPage(QWidget):
 
         button_grid = QGridLayout()
         self.validate_button = QPushButton("Validate")
+        self.test_destination_button = QPushButton("Test Destination")
         self.save_button = QPushButton("Save Profile")
         self.delete_button = QPushButton("Delete Profile")
         self.run_button = QPushButton("Run Backup")
         self.new_button = QPushButton("New Profile")
         button_grid.addWidget(self.validate_button, 0, 0)
-        button_grid.addWidget(self.save_button, 0, 1)
+        button_grid.addWidget(self.test_destination_button, 0, 1)
+        button_grid.addWidget(self.save_button, 0, 2)
         button_grid.addWidget(self.delete_button, 1, 0)
         button_grid.addWidget(self.run_button, 1, 1)
-        button_grid.addWidget(self.new_button, 2, 0, 1, 2)
+        button_grid.addWidget(self.new_button, 1, 2)
 
         self.status_output = QPlainTextEdit()
         self.status_output.setReadOnly(True)
@@ -231,6 +235,7 @@ class FolderProfilesPage(QWidget):
         layout.addWidget(splitter)
 
         self.validate_button.clicked.connect(self._validate_profile)
+        self.test_destination_button.clicked.connect(self._test_destination)
         self.save_button.clicked.connect(self._save_profile)
         self.delete_button.clicked.connect(self._delete_profile)
         self.run_button.clicked.connect(self._run_profile)
@@ -537,6 +542,19 @@ class FolderProfilesPage(QWidget):
             message = "Profile validation passed."
         self.append_status(message)
         QMessageBox.information(self, "Validate Profile", message)
+
+    def _test_destination(self) -> None:
+        valid, message = self.path_validation_service.validate_destination_path(
+            self.destination_edit.text(),
+            self._current_destination_type(),
+        )
+        if valid:
+            success_message = f"Destination validation passed: {self.destination_edit.text().strip()}"
+            self.append_status(success_message)
+            QMessageBox.information(self, "Test Destination", success_message)
+            return
+        self.append_status(message)
+        QMessageBox.warning(self, "Test Destination", message)
 
     def _browse_source_folder(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.source_edit.text() or "")
