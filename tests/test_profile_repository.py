@@ -41,7 +41,7 @@ def test_repository_create_update_delete(tmp_path: Path) -> None:
     repository = ProfileRepository(tmp_path / "config")
     profile = build_folder_profile()
     profile.schedule_enabled = True
-    profile.schedule_runner = "external"
+    profile.schedule_runner = "external_os"
     profile.schedule_type = "daily"
     profile.schedule_time = "10:00"
 
@@ -49,7 +49,7 @@ def test_repository_create_update_delete(tmp_path: Path) -> None:
     stored = repository.get_by_id(profile.id)
     assert stored is not None
     assert stored.name == "Documents"
-    assert stored.schedule_runner == "external"
+    assert stored.schedule_runner == "external_os"
 
     stored.name = "Pictures"
     repository.update(stored)
@@ -59,3 +59,39 @@ def test_repository_create_update_delete(tmp_path: Path) -> None:
 
     repository.delete(profile.id)
     assert repository.get_by_id(profile.id) is None
+
+
+def test_repository_normalizes_legacy_schedule_runner_values(tmp_path: Path) -> None:
+    """Legacy runner names should load as the new normalized values."""
+    repository = ProfileRepository(tmp_path / "config")
+    profile = build_folder_profile()
+    profile.schedule_enabled = True
+    profile.schedule_runner = "internal_app"
+    repository.create(profile)
+
+    repository.profiles_path.write_text(
+        """
+{
+  "profiles": [
+    {
+      "id": "legacy-profile",
+      "name": "Legacy Runner",
+      "type": "folder",
+      "source": "/tmp/source",
+      "destination": "/tmp/destination",
+      "engine": "local_copy",
+      "mode": "copy_new_changed",
+      "schedule_enabled": true,
+      "schedule_runner": "external",
+      "schedule_type": "daily",
+      "schedule_time": "10:00"
+    }
+  ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    stored = repository.list_profiles()[0]
+
+    assert stored.schedule_runner == "external_os"

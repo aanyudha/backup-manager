@@ -9,8 +9,10 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -25,8 +27,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.engines.folder_backup_engine import FolderBackupEngine
 from app.models.profile import FolderBackupProfile, utc_now
 from app.services.platform_service import PlatformService
+from app.services.remote_browser_service import RemoteBrowserService
+from app.ui.remote_folder_browser_dialog import RemoteFolderBrowserDialog
 from app.ui.schedule_fields_widget import ScheduleFieldsSection
 
 
@@ -37,10 +42,15 @@ class FolderProfilesPage(QWidget):
     delete_requested = Signal(str)
     run_requested = Signal(str)
 
-    def __init__(self, platform_service: PlatformService) -> None:
+    def __init__(
+        self,
+        platform_service: PlatformService,
+        remote_browser_service: RemoteBrowserService,
+    ) -> None:
         super().__init__()
         self.setObjectName("folderProfilesPage")
         self.platform_service = platform_service
+        self.remote_browser_service = remote_browser_service
         self._profiles: dict[str, FolderBackupProfile] = {}
         self._current_id: str | None = None
 
@@ -61,9 +71,12 @@ class FolderProfilesPage(QWidget):
 
         self.name_edit = QLineEdit()
         self.source_edit = QLineEdit()
+        self.source_browse_button = QPushButton("Browse Source")
         self.destination_edit = QLineEdit()
+        self.destination_browse_button = QPushButton("Browse Destination")
         self.engine_combo = QComboBox()
         self.engine_combo.addItems(["auto", "local_copy", "robocopy", "rsync", "sftp", "ftp"])
+        self.resolved_engine_value = QLabel("local_copy")
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["copy_new_changed", "sync_without_delete", "mirror_with_delete"])
         self.log_folder_edit = QLineEdit()
@@ -74,12 +87,14 @@ class FolderProfilesPage(QWidget):
         self.sftp_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.sftp_private_key_edit = QLineEdit()
         self.sftp_remote_path_edit = QLineEdit()
+        self.sftp_browse_button = QPushButton("Browse SFTP Folder")
         self.ftp_host_edit = QLineEdit()
         self.ftp_port_edit = QLineEdit("21")
         self.ftp_username_edit = QLineEdit()
         self.ftp_password_edit = QLineEdit()
         self.ftp_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.ftp_remote_path_edit = QLineEdit()
+        self.ftp_browse_button = QPushButton("Browse FTP Folder")
         self.ftp_passive_checkbox = QCheckBox("Use Passive Mode")
         self.ftp_passive_checkbox.setChecked(True)
         self.rsync_args_edit = QLineEdit()
@@ -95,9 +110,13 @@ class FolderProfilesPage(QWidget):
         self.schedule_fields = ScheduleFieldsSection()
 
         form.addRow("Profile Name", self.name_edit)
-        form.addRow("Source", self.source_edit)
-        form.addRow("Destination", self.destination_edit)
+        form.addRow("Source", self._build_line_with_button(self.source_edit, self.source_browse_button))
+        form.addRow(
+            "Destination",
+            self._build_line_with_button(self.destination_edit, self.destination_browse_button),
+        )
         form.addRow("Engine", self.engine_combo)
+        form.addRow("Resolved Engine", self.resolved_engine_value)
         form.addRow("Mode", self.mode_combo)
         form.addRow("Log Folder", self.log_folder_edit)
         form.addRow(QLabel("SFTP Settings"))
@@ -106,13 +125,19 @@ class FolderProfilesPage(QWidget):
         form.addRow("SFTP Username", self.sftp_username_edit)
         form.addRow("SFTP Password", self.sftp_password_edit)
         form.addRow("SFTP Private Key", self.sftp_private_key_edit)
-        form.addRow("SFTP Remote Path", self.sftp_remote_path_edit)
-        form.addRow(QLabel("FTP Settings (less secure than SFTP; remote-to-local only in MVP)"))
+        form.addRow(
+            "SFTP Remote Path",
+            self._build_line_with_button(self.sftp_remote_path_edit, self.sftp_browse_button),
+        )
+        form.addRow(QLabel("FTP Settings (plain FTP only; use SFTP for encrypted transfer)"))
         form.addRow("FTP Host", self.ftp_host_edit)
         form.addRow("FTP Port", self.ftp_port_edit)
         form.addRow("FTP Username", self.ftp_username_edit)
         form.addRow("FTP Password", self.ftp_password_edit)
-        form.addRow("FTP Remote Path", self.ftp_remote_path_edit)
+        form.addRow(
+            "FTP Remote Path",
+            self._build_line_with_button(self.ftp_remote_path_edit, self.ftp_browse_button),
+        )
         form.addRow("", self.ftp_passive_checkbox)
         form.addRow("Rsync Extra Args", self.rsync_args_edit)
         form.addRow("", self.enabled_checkbox)
@@ -157,8 +182,38 @@ class FolderProfilesPage(QWidget):
         self.run_button.clicked.connect(self._run_profile)
         self.new_button.clicked.connect(self.clear_form)
         self.engine_combo.currentTextChanged.connect(self._refresh_warning)
+        self.engine_combo.currentTextChanged.connect(self._refresh_resolved_engine)
+        self.mode_combo.currentTextChanged.connect(self._refresh_warning)
         self.retention_checkbox.toggled.connect(self.retention_days_spin.setEnabled)
+        self.source_browse_button.clicked.connect(
+            lambda _checked=False: self._browse_local_folder(self.source_edit)
+        )
+        self.destination_browse_button.clicked.connect(
+            lambda _checked=False: self._browse_local_folder(self.destination_edit)
+        )
+        self.ftp_browse_button.clicked.connect(self._browse_ftp_folder)
+        self.sftp_browse_button.clicked.connect(self._browse_sftp_folder)
+        for widget in (
+            self.source_edit,
+            self.destination_edit,
+            self.sftp_host_edit,
+            self.sftp_remote_path_edit,
+            self.ftp_host_edit,
+            self.ftp_remote_path_edit,
+        ):
+            widget.textChanged.connect(self._refresh_resolved_engine)
+            widget.textChanged.connect(self._refresh_warning)
         self._refresh_warning()
+        self._refresh_resolved_engine()
+
+    @staticmethod
+    def _build_line_with_button(line_edit: QLineEdit, button: QPushButton) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(line_edit)
+        layout.addWidget(button)
+        return container
 
     def set_profiles(self, profiles: list[FolderBackupProfile]) -> None:
         """Load folder profiles into the list."""
@@ -215,6 +270,7 @@ class FolderProfilesPage(QWidget):
         self.schedule_fields.clear()
         self.profile_list.clearSelection()
         self._refresh_warning()
+        self._refresh_resolved_engine()
 
     def _load_selected_profile(self, current: QListWidgetItem | None) -> None:
         if current is None:
@@ -250,6 +306,7 @@ class FolderProfilesPage(QWidget):
         self.retention_days_spin.setEnabled(profile.retention_enabled)
         self.schedule_fields.load_profile(profile)
         self._refresh_warning()
+        self._refresh_resolved_engine()
 
     def _collect_form_data(self) -> FolderBackupProfile:
         existing = self._profiles.get(self._current_id or "")
@@ -291,25 +348,137 @@ class FolderProfilesPage(QWidget):
             payload["id"] = existing.id
         return FolderBackupProfile(**payload)
 
-    def _refresh_warning(self) -> None:
+    def _refresh_warning(self, *_args) -> None:
         warnings = self.platform_service.compatibility_warnings()
         engine = self.engine_combo.currentText()
+        effective_engine = FolderBackupEngine.resolve_engine_inputs(
+            platform_service=self.platform_service,
+            requested_engine=engine,
+            source=self.source_edit.text(),
+            destination=self.destination_edit.text(),
+            sftp_host=self.sftp_host_edit.text() or None,
+            sftp_remote_path=self.sftp_remote_path_edit.text() or None,
+            ftp_host=self.ftp_host_edit.text() or None,
+            ftp_remote_path=self.ftp_remote_path_edit.text() or None,
+        )
+        if self.engine_combo.currentText() == "auto" and self._has_sftp_configuration() and self._has_ftp_configuration():
+            warnings.append(
+                "Both SFTP and FTP settings are filled. Auto selected SFTP. "
+                "Clear unused settings to avoid confusion."
+            )
         if engine == "robocopy" and not self.platform_service.is_windows():
             warnings.append("Selected engine is not compatible with this OS.")
-        if engine == "sftp" and self.mode_combo.currentText() == "mirror_with_delete":
+        if effective_engine == "sftp" and self.mode_combo.currentText() == "mirror_with_delete":
             warnings.append("SFTP mirror_with_delete is unsupported in the MVP.")
-        if engine == "ftp" and self.mode_combo.currentText() == "mirror_with_delete":
+        if effective_engine == "ftp" and self.mode_combo.currentText() == "mirror_with_delete":
             warnings.append("FTP mirror_with_delete is unsupported in the MVP.")
         self.warning_label.setText(" | ".join(warnings) if warnings else "No compatibility warnings.")
 
+    def _refresh_resolved_engine(self, *_args) -> None:
+        resolved = FolderBackupEngine.resolve_engine_inputs(
+            platform_service=self.platform_service,
+            requested_engine=self.engine_combo.currentText(),
+            source=self.source_edit.text(),
+            destination=self.destination_edit.text(),
+            sftp_host=self.sftp_host_edit.text() or None,
+            sftp_remote_path=self.sftp_remote_path_edit.text() or None,
+            ftp_host=self.ftp_host_edit.text() or None,
+            ftp_remote_path=self.ftp_remote_path_edit.text() or None,
+        )
+        self.resolved_engine_value.setText(resolved)
+
+    def _has_sftp_configuration(self) -> bool:
+        return bool(self.sftp_host_edit.text().strip() or self.sftp_remote_path_edit.text().strip())
+
+    def _has_ftp_configuration(self) -> bool:
+        return bool(self.ftp_host_edit.text().strip() or self.ftp_remote_path_edit.text().strip())
+
     def _validate_profile(self) -> None:
         try:
-            self._collect_form_data()
+            profile = self._collect_form_data()
         except Exception as exc:
             self.append_status(str(exc))
             QMessageBox.warning(self, "Validate Profile", str(exc))
             return
-        self.append_status("Profile validation passed.")
+        self._refresh_resolved_engine()
+        if profile.engine == "auto":
+            message = (
+                f"Profile validation passed. Auto detected transport: "
+                f"{self.resolved_engine_value.text()}"
+            )
+        else:
+            message = "Profile validation passed."
+        self.append_status(message)
+        QMessageBox.information(self, "Validate Profile", message)
+
+    def _browse_local_folder(self, target: QLineEdit) -> None:
+        selected = QFileDialog.getExistingDirectory(self, "Select Folder", target.text() or "")
+        if selected:
+            target.setText(selected)
+
+    def _browse_ftp_folder(self, *_args) -> None:
+        if (
+            not self.ftp_host_edit.text().strip()
+            or not self.ftp_username_edit.text().strip()
+            or not self.ftp_password_edit.text()
+        ):
+            message = "Fill FTP connection fields before browsing."
+            self.append_status(message)
+            QMessageBox.warning(self, "Browse FTP Folder", message)
+            return
+        dialog = RemoteFolderBrowserDialog(
+            protocol="ftp",
+            browser_service=self.remote_browser_service,
+            connection={
+                "host": self.ftp_host_edit.text(),
+                "port": int(self.ftp_port_edit.text() or "21"),
+                "username": self.ftp_username_edit.text(),
+                "password": self.ftp_password_edit.text(),
+                "passive_mode": self.ftp_passive_checkbox.isChecked(),
+            },
+            initial_path=self.ftp_remote_path_edit.text() or "/",
+        )
+        if dialog.exec() and dialog.selected_path:
+            self._apply_ftp_remote_path(dialog.selected_path)
+
+    def _browse_sftp_folder(self, *_args) -> None:
+        if (
+            not self.sftp_host_edit.text().strip()
+            or not self.sftp_username_edit.text().strip()
+            or (not self.sftp_password_edit.text() and not self.sftp_private_key_edit.text().strip())
+        ):
+            message = "Fill SFTP connection fields before browsing."
+            self.append_status(message)
+            QMessageBox.warning(self, "Browse SFTP Folder", message)
+            return
+        dialog = RemoteFolderBrowserDialog(
+            protocol="sftp",
+            browser_service=self.remote_browser_service,
+            connection={
+                "host": self.sftp_host_edit.text(),
+                "port": int(self.sftp_port_edit.text() or "22"),
+                "username": self.sftp_username_edit.text(),
+                "password": self.sftp_password_edit.text() or None,
+                "private_key_path": self.sftp_private_key_edit.text() or None,
+            },
+            initial_path=self.sftp_remote_path_edit.text() or "/",
+        )
+        if dialog.exec() and dialog.selected_path:
+            self._apply_sftp_remote_path(dialog.selected_path)
+
+    def _apply_ftp_remote_path(self, remote_path: str) -> None:
+        self.ftp_remote_path_edit.setText(remote_path)
+        if self.engine_combo.currentText() not in {"auto", "ftp"}:
+            message = "You selected an FTP remote folder, but Engine is not auto or ftp."
+            self.append_status(message)
+            QMessageBox.warning(self, "Browse FTP Folder", message)
+
+    def _apply_sftp_remote_path(self, remote_path: str) -> None:
+        self.sftp_remote_path_edit.setText(remote_path)
+        if self.engine_combo.currentText() not in {"auto", "sftp"}:
+            message = "You selected an SFTP remote folder, but Engine is not auto or sftp."
+            self.append_status(message)
+            QMessageBox.warning(self, "Browse SFTP Folder", message)
 
     def _save_profile(self) -> None:
         try:

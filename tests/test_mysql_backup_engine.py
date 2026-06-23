@@ -86,6 +86,18 @@ def test_build_dump_command_includes_internal_defaults(tmp_path: Path) -> None:
     assert COLUMN_STATISTICS_OPTION in command.args
 
 
+def test_blank_mysqldump_path_uses_path_lookup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Blank mysqldump paths should auto-detect mysqldump from PATH."""
+    engine = MySQLBackupEngine(LogService(tmp_path))
+    profile = build_mysql_profile(tmp_path)
+    profile.mysqldump_path = None
+    monkeypatch.setattr("app.engines.mysql_backup_engine.shutil.which", lambda command: "/usr/bin/mysqldump")
+
+    resolved = engine.resolve_mysqldump(profile)
+
+    assert resolved == "/usr/bin/mysqldump"
+
+
 def test_access_denied_stderr_marks_backup_failed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

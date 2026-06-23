@@ -19,7 +19,7 @@ def build_profile(
     schedule_day_of_month: int | None = None,
     enabled: bool = True,
     schedule_enabled: bool = True,
-    schedule_runner: str = "external",
+    schedule_runner: str = "external_os",
     name: str = "Primary DB",
 ) -> MySQLBackupProfile:
     """Create a schedulable profile for export tests."""
@@ -55,7 +55,7 @@ def build_service(tmp_path: Path) -> ExternalSchedulerService:
     )
 
 
-def test_default_schedule_runner_is_internal(tmp_path: Path) -> None:
+def test_default_schedule_runner_is_internal_app(tmp_path: Path) -> None:
     fake_dump = tmp_path / "mysqldump"
     fake_dump.write_text("", encoding="utf-8")
     profile = MySQLBackupProfile(
@@ -71,7 +71,7 @@ def test_default_schedule_runner_is_internal(tmp_path: Path) -> None:
         destination=str(tmp_path / "backups"),
     )
 
-    assert profile.schedule_runner == "internal"
+    assert profile.schedule_runner == "internal_app"
 
 
 def test_daily_cron_expression(tmp_path: Path) -> None:
@@ -107,15 +107,18 @@ def test_monthly_cron_expression(tmp_path: Path) -> None:
 
 def test_external_export_rejects_internal_runner_profiles(tmp_path: Path) -> None:
     service = build_service(tmp_path)
-    profile = build_profile(tmp_path, schedule_runner="internal")
+    profile = build_profile(tmp_path, schedule_runner="internal_app")
 
-    with pytest.raises(ValueError, match="Set Schedule Runner to External before exporting this profile."):
+    with pytest.raises(
+        ValueError,
+        match="Set Schedule Runner to External OS Scheduler before exporting this profile.",
+    ):
         service.validate_exportable(profile)
 
 
 def test_external_export_allows_external_runner_profiles(tmp_path: Path) -> None:
     service = build_service(tmp_path)
-    profile = build_profile(tmp_path, schedule_runner="external")
+    profile = build_profile(tmp_path, schedule_runner="external_os")
 
     export = service.build_export(profile, Path(r"C:\HBM\HeisenbergBackupManager.exe"))
 
@@ -220,10 +223,24 @@ def test_linux_run_now_command_excludes_cron_timing(tmp_path: Path) -> None:
 
 def test_linux_export_rejects_internal_runner_profiles(tmp_path: Path) -> None:
     service = build_service(tmp_path)
-    profile = build_profile(tmp_path, schedule_runner="internal")
+    profile = build_profile(tmp_path, schedule_runner="internal_app")
 
-    with pytest.raises(ValueError, match="Set Schedule Runner to External before exporting this profile."):
+    with pytest.raises(
+        ValueError,
+        match="Set Schedule Runner to External OS Scheduler before exporting this profile.",
+    ):
         service.generate_cron_line(profile, "/usr/local/bin/python3")
+
+
+def test_external_export_rejects_service_runner_profiles(tmp_path: Path) -> None:
+    service = build_service(tmp_path)
+    profile = build_profile(tmp_path, schedule_runner="service")
+
+    with pytest.raises(
+        ValueError,
+        match="Set Schedule Runner to External OS Scheduler before exporting this profile.",
+    ):
+        service.validate_exportable(profile)
 
 
 def test_paths_with_spaces_are_quoted_correctly(tmp_path: Path) -> None:

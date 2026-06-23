@@ -47,7 +47,7 @@ class StubSchedulerService:
         self.is_due_calls: list[str] = []
         self.mark_run_calls: list[str] = []
 
-    def is_due(self, profile: FolderBackupProfile, now: datetime) -> bool:
+    def is_due(self, profile: FolderBackupProfile, now: datetime, *, runner_mode=None) -> bool:
         self.is_due_calls.append(profile.id)
         return True
 
@@ -84,11 +84,12 @@ def build_profile(*, profile_id: str, schedule_runner: str) -> FolderBackupProfi
     )
 
 
-def test_scheduler_service_runner_respects_internal_runner_only() -> None:
+def test_scheduler_service_runner_respects_service_runner_only() -> None:
     backup_service = StubBackupService(
         [
-            build_profile(profile_id="internal-profile", schedule_runner="internal"),
-            build_profile(profile_id="external-profile", schedule_runner="external"),
+            build_profile(profile_id="internal-profile", schedule_runner="internal_app"),
+            build_profile(profile_id="external-profile", schedule_runner="external_os"),
+            build_profile(profile_id="service-profile", schedule_runner="service"),
         ]
     )
     scheduler_service = StubSchedulerService()
@@ -99,10 +100,11 @@ def test_scheduler_service_runner_respects_internal_runner_only() -> None:
         scheduler_service,
         log_service,
         stdout=output,
+        runner_mode="service",
     )
 
     runner.process_due_profiles(notify_when_idle=False)
 
-    assert scheduler_service.is_due_calls == ["internal-profile"]
-    assert backup_service.run_profile_calls == ["internal-profile"]
-    assert scheduler_service.mark_run_calls == ["internal-profile"]
+    assert scheduler_service.is_due_calls == ["service-profile"]
+    assert backup_service.run_profile_calls == ["service-profile"]
+    assert scheduler_service.mark_run_calls == ["service-profile"]

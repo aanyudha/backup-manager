@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from app.models.profile import FolderBackupProfile, MySQLBackupProfile, Profile
 from app.models.restore_result import RestoreResult
 from app.models.result import BackupResult
+from app.models.schedule import SCHEDULE_RUNNER_LABELS
 from app.models.settings import AppSettings
 from app.repositories.profile_repository import ProfileRepository
 from app.services.backup_service import BackupService
@@ -22,6 +23,7 @@ from app.services.log_service import LogService
 from app.services.mysql_service import MySQLService
 from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
+from app.services.remote_browser_service import RemoteBrowserService
 from app.services.restore_service import RestoreService
 from app.services.scheduler_service import SchedulerService
 from app.services.service_mode_export_service import ServiceModeExportService
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
         log_service: LogService,
         path_service: PathService,
         external_scheduler_service: ExternalSchedulerService,
+        remote_browser_service: RemoteBrowserService,
     ) -> None:
         super().__init__()
         self.repository = repository
@@ -64,6 +67,7 @@ class MainWindow(QMainWindow):
         self.log_service = log_service
         self.path_service = path_service
         self.external_scheduler_service = external_scheduler_service
+        self.remote_browser_service = remote_browser_service
         self.service_mode_export_service = ServiceModeExportService(
             app_script_path=None if path_service.is_frozen() else path_service.app_entry_path(),
             working_directory=path_service.app_root(),
@@ -81,7 +85,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.dashboard_page = DashboardPage()
         self.mysql_profiles_page = MySQLProfilesPage(mysql_service)
-        self.folder_profiles_page = FolderProfilesPage(platform_service)
+        self.folder_profiles_page = FolderProfilesPage(platform_service, remote_browser_service)
         self.restore_page = RestorePage()
         self.scheduler_page = SchedulerPage()
         self.logs_page = LogsPage(log_service.logs_dir)
@@ -440,6 +444,7 @@ class MainWindow(QMainWindow):
             self.scheduler_service,
             self.log_service,
             run_once=run_once,
+            runner_mode="internal_app",
         )
         self._scheduler_continuous = not run_once
         self.scheduler_worker.moveToThread(self.scheduler_thread)
@@ -479,14 +484,20 @@ class MainWindow(QMainWindow):
         now = datetime.now().astimezone()
         rows: list[dict[str, str]] = []
         for profile in sorted(profiles, key=lambda item: item.name.lower()):
-            next_run = self.scheduler_service.get_next_run(profile, now)
-            next_run_text = self._format_datetime(next_run)
+            next_run_text = ""
             if (
                 profile.schedule_enabled
-                and profile.schedule_runner == "external"
+                and profile.schedule_runner == "external_os"
                 and profile.schedule_type != "manual"
             ):
                 next_run_text = "Managed by OS scheduler"
+            else:
+                next_run = self.scheduler_service.get_next_run(
+                    profile,
+                    now,
+                    runner_mode=profile.schedule_runner,
+                )
+                next_run_text = self._format_datetime(next_run)
             rows.append(
                 {
                     "profile_id": profile.id,
@@ -565,9 +576,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _format_schedule_runner(schedule_runner: str) -> str:
-        if schedule_runner == "external":
-            return "External OS Scheduler"
-        return "Internal Scheduler"
+        return SCHEDULE_RUNNER_LABELS.get(schedule_runner, schedule_runner)
 
     def _save_windows_export(self, profile: Profile) -> None:
         """Persist the Windows scheduler export files."""

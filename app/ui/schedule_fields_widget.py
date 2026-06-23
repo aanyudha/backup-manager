@@ -32,11 +32,13 @@ class ScheduleFieldsSection:
     def __init__(self) -> None:
         self.schedule_enabled_checkbox = QCheckBox("Enable Schedule")
         self.schedule_runner_combo = QComboBox()
-        self.schedule_runner_combo.addItem("Internal Scheduler", userData="internal")
-        self.schedule_runner_combo.addItem("External OS Scheduler", userData="external")
+        self.schedule_runner_combo.addItem("Internal App Scheduler", userData="internal_app")
+        self.schedule_runner_combo.addItem("External OS Scheduler", userData="external_os")
+        self.schedule_runner_combo.addItem("Background Service Scheduler", userData="service")
         self.schedule_runner_help = QLabel(
-            "Internal Scheduler runs only while this app is open.\n"
-            "External OS Scheduler uses Windows Task Scheduler or Linux cron."
+            "Internal App Scheduler runs only while the desktop app is open.\n"
+            "External OS Scheduler uses Windows Task Scheduler or Linux cron per profile.\n"
+            "Background Service Scheduler runs in service mode without opening the GUI."
         )
         self.schedule_runner_help.setWordWrap(True)
         self.schedule_type_combo = QComboBox()

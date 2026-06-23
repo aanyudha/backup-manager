@@ -10,7 +10,7 @@ Heisenberg Backup Manager is an open-source desktop application for creating reu
 - Folder backup profiles with automatic engine selection
 - MySQL restore support for `.sql` and `.sql.gz` files
 - Folder restore support with overwrite-existing behavior
-- Local copy, `robocopy`, `rsync`, SFTP, and FTP transport support
+- Local copy, `robocopy`, `rsync`, SFTP, and plain FTP transport support
 - Background backup execution with UI-safe worker threads
 - Internal scheduler for daily, weekly, and monthly backup runs
 - External scheduler export for Windows Task Scheduler and Linux cron
@@ -90,7 +90,7 @@ HeisenbergBackupManager.exe --run-profile-id PROFILE_ID
 ./heisenberg-backup-manager --run-profile-id PROFILE_ID
 ```
 
-Run the internal scheduler service loop without opening the desktop UI:
+Run the background service scheduler loop without opening the desktop UI:
 
 ```bash
 python app.py --scheduler-service
@@ -121,8 +121,9 @@ HeisenbergBackupManager.exe --scheduler-service
 ## Scheduler
 
 - Each profile has a `Schedule Runner`:
-  - `Internal Scheduler` runs only while the desktop app is open.
+  - `Internal App Scheduler` runs only while the desktop app is open.
   - `External OS Scheduler` is for Windows Task Scheduler or Linux cron exports.
+  - `Background Service Scheduler` runs in `--scheduler-service` mode without opening the GUI.
 - Pick one runner mode per scheduled profile so the same backup is not triggered twice.
 - Supported schedule types are `manual`, `daily`, `weekly`, and `monthly`.
 - `daily` uses a single `HH:MM` time.
@@ -130,8 +131,9 @@ HeisenbergBackupManager.exe --scheduler-service
 - `monthly` uses `HH:MM` plus a day-of-month value from `1` to `31`.
 - If a monthly schedule is set past the end of the month, it runs on that month's last day.
 - `Run if missed` lets the app catch up later the same day after the scheduled minute has passed.
-- Internal scheduler runs only profiles where `Schedule Runner` is `Internal Scheduler`.
+- Internal scheduler runs only profiles where `Schedule Runner` is `Internal App Scheduler`.
 - External export is allowed only for profiles where `Schedule Runner` is `External OS Scheduler`.
+- Service mode runs only profiles where `Schedule Runner` is `Background Service Scheduler`.
 - Use the `Scheduler` tab to review schedule summaries, runner mode, last run details, next run times, and current status.
 - For external profiles, the app shows `Managed by OS scheduler` instead of an internal next-run timestamp.
 - Use `Export External Schedule` to generate reviewable Windows and Linux commands for manual installation.
@@ -141,10 +143,8 @@ HeisenbergBackupManager.exe --scheduler-service
 
 - Service mode is helper/export based in this release. The app does not install privileged services automatically.
 - `Run as Service / Background Scheduler Mode` is a settings flag that records intent for background scheduling.
-- `Service Runner Mode` supports:
-  - `Internal Scheduler Service` for the `--scheduler-service` loop.
-  - `External OS Scheduler` when you prefer per-profile Windows Task Scheduler or cron exports.
-- `--scheduler-service` runs only scheduled backup profiles whose `Schedule Runner` is `Internal Scheduler`.
+- To use service mode, set each profile `Schedule Runner` to `Background Service Scheduler`.
+- `--scheduler-service` runs only scheduled backup profiles whose `Schedule Runner` is `Background Service Scheduler`.
 - Restore operations are never started by service mode.
 - Service helper exports are saved under `exports/service/`.
 - Profile credentials remain in local config files and should be protected.
@@ -251,6 +251,7 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - `robocopy` is used automatically for local or UNC folder backups when it is available.
 - UNC paths are supported by the folder backup engine.
 - You can optionally set a custom `mysqldump` path in the profile or in settings.
+- Leave the profile `mysqldump Path` blank to auto-detect `mysqldump` from `PATH`.
 
 ## Linux Notes
 
@@ -308,9 +309,14 @@ Folder backup outputs are directories. In v0.2.0, SHA256 and retention are appli
 
 ## FTP Notes
 
+- FTP is plain FTP in this MVP.
+- Use SFTP for encrypted transfer.
 - FTP support in this MVP is remote source to local destination only.
 - FTP downloads new or changed files recursively and preserves the remote directory structure.
 - `mirror_with_delete` is intentionally unsupported for FTP in the MVP.
+- Browse remote FTP source folders with `Browse FTP Folder`.
+- Local source selection uses the `Source` field.
+- FTP source selection uses `FTP Remote Path`.
 - FTP is less secure than SFTP and should be used only when SFTP is unavailable.
 - SFTP is the recommended remote transport when available.
 
@@ -326,6 +332,9 @@ Folder backup outputs are directories. In v0.2.0, SHA256 and retention are appli
 - MVP support covers remote source to local destination downloads.
 - New and changed files are downloaded recursively.
 - `mirror_with_delete` is intentionally unsupported for SFTP in the MVP.
+- Browse remote SFTP source folders with `Browse SFTP Folder`.
+- Local source selection uses the `Source` field.
+- SFTP source selection uses `SFTP Remote Path`.
 
 ## Rsync Notes
 

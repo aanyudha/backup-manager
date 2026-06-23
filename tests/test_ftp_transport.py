@@ -104,10 +104,12 @@ def test_folder_backup_engine_routes_ftp_profiles(tmp_path: Path, monkeypatch: p
 
 def test_folder_profile_serialization_round_trips_ftp_fields(tmp_path: Path) -> None:
     profile = build_ftp_profile(tmp_path)
+    serialized = profile.model_dump(mode="json")
 
-    restored = parse_profile(profile.model_dump(mode="json"))
+    restored = parse_profile(serialized)
 
     assert isinstance(restored, FolderBackupProfile)
+    assert "ftp_tls" not in serialized
     assert restored.engine == "ftp"
     assert restored.ftp_host == "ftp.example.com"
     assert restored.ftp_port == 21

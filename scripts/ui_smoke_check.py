@@ -24,6 +24,7 @@ from app.services.log_service import LogService
 from app.services.mysql_service import MySQLService
 from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
+from app.services.remote_browser_service import RemoteBrowserService
 from app.services.restore_service import RestoreService
 from app.services.scheduler_service import SchedulerService
 from app.ui.folder_profiles_page import FolderProfilesPage
@@ -41,6 +42,7 @@ def main() -> int:
     backup_service = BackupService(repository, platform_service, log_service)
     restore_service = RestoreService(repository, mysql_service, log_service)
     scheduler_service = SchedulerService(SchedulerStateRepository(path_service.config_dir()))
+    remote_browser_service = RemoteBrowserService()
     external_scheduler_service = ExternalSchedulerService(
         app_script_path=path_service.app_entry_path(),
         logs_dir=path_service.logs_dir(),
@@ -58,6 +60,7 @@ def main() -> int:
         log_service=log_service,
         path_service=path_service,
         external_scheduler_service=external_scheduler_service,
+        remote_browser_service=remote_browser_service,
     )
     title = window.windowTitle()
     assert title == "Heisenberg Backup Manager", title
@@ -70,7 +73,7 @@ def main() -> int:
     assert database_list is not None, "databaseListWidget not found"
     assert database_list.minimumHeight() >= 160, database_list.minimumHeight()
     print(f"MySQL database list minimum height verified: {database_list.minimumHeight()}")
-    folder_page = FolderProfilesPage(platform_service)
+    folder_page = FolderProfilesPage(platform_service, remote_browser_service)
     assert folder_page.objectName() == "folderProfilesPage", folder_page.objectName()
     assert folder_page.status_output.minimumHeight() >= 100, folder_page.status_output.minimumHeight()
     print(f"Folder status panel minimum height verified: {folder_page.status_output.minimumHeight()}")

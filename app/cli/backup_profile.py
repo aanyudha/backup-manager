@@ -15,7 +15,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
         "--scheduler-service",
         dest="scheduler_service",
         action="store_true",
-        help="Run the internal scheduler loop without starting the desktop UI.",
+        help="Run the service scheduler loop without starting the desktop UI.",
     )
     return parser
 

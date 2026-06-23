@@ -25,6 +25,8 @@ def test_mysql_profiles_page_exposes_expanding_database_list() -> None:
     database_list = page.findChild(QListWidget, "databaseListWidget")
     assert database_list is not None
     assert database_list.minimumHeight() >= 160
+    assert "auto-detect mysqldump from PATH" in page.mysqldump_help_label.text()
+    assert "engine auto" not in page.mysqldump_help_label.text().lower()
 
     page.close()
     app.quit()

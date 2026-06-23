@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from typing import TextIO
 
+from app.models.schedule import ScheduleRunner
 from app.services.backup_service import BackupService
 from app.services.log_service import LogService
 from app.services.scheduler_service import SchedulerService
@@ -23,12 +24,14 @@ class SchedulerServiceRunner:
         *,
         interval_seconds: int = 60,
         stdout: TextIO | None = None,
+        runner_mode: ScheduleRunner = "service",
     ) -> None:
         self.backup_service = backup_service
         self.scheduler_service = scheduler_service
         self.log_service = log_service
         self.interval_seconds = interval_seconds
         self.stdout = stdout or sys.stdout
+        self.runner_mode = runner_mode
         self._stop_requested = False
 
     def stop(self) -> None:
@@ -59,7 +62,8 @@ class SchedulerServiceRunner:
         due_profiles = [
             profile
             for profile in profiles
-            if profile.schedule_runner == "internal" and self.scheduler_service.is_due(profile, now)
+            if profile.schedule_runner == self.runner_mode
+            and self.scheduler_service.is_due(profile, now, runner_mode=self.runner_mode)
         ]
 
         if not due_profiles:

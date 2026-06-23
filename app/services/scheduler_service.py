@@ -6,7 +6,7 @@ from calendar import monthrange
 from datetime import date, datetime, time, timedelta
 
 from app.models.profile import Profile
-from app.models.schedule import WEEKDAY_NAMES
+from app.models.schedule import ScheduleRunner, WEEKDAY_NAMES, normalize_schedule_runner
 from app.repositories.scheduler_state_repository import SchedulerStateRepository
 
 
@@ -16,9 +16,15 @@ class SchedulerService:
     def __init__(self, state_repository: SchedulerStateRepository) -> None:
         self.state_repository = state_repository
 
-    def is_due(self, profile: Profile, now: datetime) -> bool:
+    def is_due(
+        self,
+        profile: Profile,
+        now: datetime,
+        *,
+        runner_mode: ScheduleRunner = "internal_app",
+    ) -> bool:
         """Return whether the given profile should run now."""
-        candidate = self._current_window(profile, now)
+        candidate = self._current_window(profile, now, runner_mode=runner_mode)
         if candidate is None:
             return False
         return self._is_due_for_candidate(profile, candidate, now)
@@ -46,9 +52,15 @@ class SchedulerService:
             f"at {profile.schedule_time}"
         )
 
-    def get_next_run(self, profile: Profile, now: datetime) -> datetime | None:
+    def get_next_run(
+        self,
+        profile: Profile,
+        now: datetime,
+        *,
+        runner_mode: ScheduleRunner = "internal_app",
+    ) -> datetime | None:
         """Return the next scheduled run time for a profile."""
-        if not self._is_schedulable(profile):
+        if not self._is_schedulable(profile, runner_mode=runner_mode):
             return None
 
         if profile.schedule_type == "daily":
@@ -59,11 +71,16 @@ class SchedulerService:
             return self._next_monthly_run(profile, now)
         return None
 
-    def _is_schedulable(self, profile: Profile) -> bool:
+    def _is_schedulable(
+        self,
+        profile: Profile,
+        *,
+        runner_mode: ScheduleRunner,
+    ) -> bool:
         return (
             profile.enabled
             and profile.schedule_enabled
-            and profile.schedule_runner == "internal"
+            and normalize_schedule_runner(profile.schedule_runner) == runner_mode
             and profile.schedule_type != "manual"
         )
 
@@ -82,8 +99,14 @@ class SchedulerService:
             microsecond=0,
         )
 
-    def _current_window(self, profile: Profile, now: datetime) -> datetime | None:
-        if not self._is_schedulable(profile):
+    def _current_window(
+        self,
+        profile: Profile,
+        now: datetime,
+        *,
+        runner_mode: ScheduleRunner,
+    ) -> datetime | None:
+        if not self._is_schedulable(profile, runner_mode=runner_mode):
             return None
 
         schedule_time = self._time_value(profile)

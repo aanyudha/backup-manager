@@ -11,17 +11,86 @@ if platform.system().lower() == "linux":
 from PySide6.QtWidgets import QApplication
 
 from app.services.platform_service import PlatformService
+from app.services.remote_browser_service import RemoteBrowserService
 from app.ui.folder_profiles_page import FolderProfilesPage
 
 
-def test_folder_profiles_page_exposes_scrollable_form_and_status_panel() -> None:
+def test_folder_profiles_page_exposes_scrollable_form_and_status_panel(monkeypatch) -> None:
     """The folder page should remain usable after scheduler fields were added."""
     app = QApplication.instance() or QApplication([])
+    platform_service = PlatformService()
+    monkeypatch.setattr(platform_service, "is_windows", lambda: False)
+    monkeypatch.setattr(platform_service, "command_exists", lambda command: False)
 
-    page = FolderProfilesPage(PlatformService())
+    page = FolderProfilesPage(platform_service, RemoteBrowserService())
 
     assert page.objectName() == "folderProfilesPage"
     assert page.status_output.minimumHeight() >= 100
+    assert page.resolved_engine_value.text() == "local_copy"
+    assert "TLS" not in page.ftp_browse_button.text()
+    assert page.ftp_browse_button.text() == "Browse FTP Folder"
+
+    page.close()
+    app.quit()
+
+
+def test_folder_profiles_page_updates_resolved_engine_for_remote_sources(monkeypatch) -> None:
+    """Remote-path fields should update the resolved engine label immediately."""
+    app = QApplication.instance() or QApplication([])
+    page = FolderProfilesPage(PlatformService(), RemoteBrowserService())
+
+    page.engine_combo.setCurrentText("auto")
+    page.ftp_host_edit.setText("ftp.example.com")
+    page.ftp_remote_path_edit.setText("/exports")
+    assert page.resolved_engine_value.text() == "ftp"
+
+    page.sftp_host_edit.setText("sftp.example.com")
+    page.sftp_remote_path_edit.setText("/incoming")
+    assert page.resolved_engine_value.text() == "sftp"
+    assert "Auto selected SFTP" in page.warning_label.text()
+
+    page.close()
+    app.quit()
+
+
+def test_selecting_ftp_folder_updates_remote_path(monkeypatch) -> None:
+    """Applying a browsed FTP folder should write back to the FTP path field."""
+    app = QApplication.instance() or QApplication([])
+    page = FolderProfilesPage(PlatformService(), RemoteBrowserService())
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "app.ui.folder_profiles_page.QMessageBox.warning",
+        lambda *args: warnings.append(str(args[-1])),
+    )
+
+    page.engine_combo.setCurrentText("auto")
+    page._apply_ftp_remote_path("/exports")
+
+    assert page.ftp_remote_path_edit.text() == "/exports"
+    assert page.resolved_engine_value.text() == "ftp"
+    assert warnings == []
+
+    page.close()
+    app.quit()
+
+
+def test_selecting_sftp_folder_warns_when_engine_is_incompatible(monkeypatch) -> None:
+    """Selecting an SFTP folder should warn when engine is not auto or sftp."""
+    app = QApplication.instance() or QApplication([])
+    page = FolderProfilesPage(PlatformService(), RemoteBrowserService())
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "app.ui.folder_profiles_page.QMessageBox.warning",
+        lambda *args: warnings.append(str(args[-1])),
+    )
+
+    page.engine_combo.setCurrentText("ftp")
+    page._apply_sftp_remote_path("/incoming")
+
+    assert page.sftp_remote_path_edit.text() == "/incoming"
+    assert warnings == ["You selected an SFTP remote folder, but Engine is not auto or sftp."]
 
     page.close()
     app.quit()

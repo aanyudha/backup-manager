@@ -10,6 +10,7 @@ __all__ = [
     "LogService",
     "MySQLService",
     "PlatformService",
+    "RemoteBrowserService",
     "RestoreService",
     "SchedulerService",
     "RetentionService",
@@ -43,6 +44,10 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from app.services.platform_service import PlatformService
 
         return PlatformService
+    if name == "RemoteBrowserService":
+        from app.services.remote_browser_service import RemoteBrowserService
+
+        return RemoteBrowserService
     if name == "RetentionService":
         from app.services.retention_service import RetentionService
 

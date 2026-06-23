@@ -92,8 +92,10 @@ class ExternalSchedulerService:
             raise ValueError("Disabled profiles cannot be exported.")
         if not profile.schedule_enabled:
             raise ValueError("Scheduling must be enabled before export.")
-        if profile.schedule_runner != "external":
-            raise ValueError("Set Schedule Runner to External before exporting this profile.")
+        if profile.schedule_runner != "external_os":
+            raise ValueError(
+                "Set Schedule Runner to External OS Scheduler before exporting this profile."
+            )
         if profile.schedule_type == "manual":
             raise ValueError("Manual schedules cannot be exported.")
         if not profile.schedule_time:

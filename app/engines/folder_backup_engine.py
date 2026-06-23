@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from app.engines.base import BaseBackupEngine, ProgressCallback
@@ -27,22 +28,69 @@ class FolderBackupEngine(BaseBackupEngine):
         """Return True for local, UNC, or mounted paths."""
         return not (":" in value and not value.startswith("\\\\") and not Path(value).drive)
 
-    def resolve_engine(self, profile: FolderBackupProfile) -> str:
-        """Select an engine based on profile choice and host OS."""
+    @staticmethod
+    def _looks_like_rsync_remote(value: str) -> bool:
+        """Return whether a path resembles rsync remote syntax."""
+        cleaned = value.strip()
+        if not cleaned or cleaned.startswith("\\\\"):
+            return False
+        if re.match(r"^[A-Za-z]:[\\/]", cleaned):
+            return False
+        return bool(
+            re.match(r"^[^@\s:/\\]+@[^:\s]+:.+", cleaned)
+            or re.match(r"^[A-Za-z0-9._-]+:.+", cleaned)
+        )
+
+    @classmethod
+    def resolve_engine_inputs(
+        cls,
+        *,
+        platform_service: PlatformService,
+        requested_engine: str,
+        source: str,
+        destination: str,
+        sftp_host: str | None = None,
+        sftp_remote_path: str | None = None,
+        ftp_host: str | None = None,
+        ftp_remote_path: str | None = None,
+    ) -> str:
+        """Resolve a folder engine from raw form inputs without model validation."""
+        profile = FolderBackupProfile.model_construct(
+            name="preview",
+            type="folder",
+            source=source,
+            destination=destination,
+            engine=requested_engine,
+            sftp_host=sftp_host,
+            sftp_remote_path=sftp_remote_path,
+            ftp_host=ftp_host,
+            ftp_remote_path=ftp_remote_path,
+        )
+        return cls.resolve_engine_for_profile(profile, platform_service)
+
+    @classmethod
+    def resolve_engine_for_profile(
+        cls,
+        profile: FolderBackupProfile,
+        platform_service: PlatformService,
+    ) -> str:
+        """Resolve the effective engine for a folder profile."""
         if profile.engine != "auto":
             return profile.engine
 
-        if self.platform_service.is_windows():
-            if self._is_localish_path(profile.source) and self.platform_service.command_exists("robocopy"):
-                return "robocopy"
-            return "local_copy"
-
-        if self.platform_service.is_linux():
-            if self.platform_service.command_exists("rsync"):
-                return "rsync"
-            return "local_copy"
-
+        if profile.has_sftp_configuration():
+            return "sftp"
+        if profile.has_ftp_configuration():
+            return "ftp"
+        if cls._looks_like_rsync_remote(profile.source) or cls._looks_like_rsync_remote(profile.destination):
+            return "rsync"
+        if platform_service.is_windows() and platform_service.command_exists("robocopy"):
+            return "robocopy"
         return "local_copy"
+
+    def resolve_engine(self, profile: FolderBackupProfile) -> str:
+        """Select an engine based on profile choice and host OS."""
+        return self.resolve_engine_for_profile(profile, self.platform_service)
 
     def _validate_profile(self, profile: FolderBackupProfile, engine: str) -> None:
         """Validate profile path assumptions before execution."""
@@ -68,9 +116,16 @@ class FolderBackupEngine(BaseBackupEngine):
     ) -> BackupResult:
         """Execute a folder backup using the resolved transport."""
         selected_engine = self.resolve_engine(profile)
+        self.log_service.log_app(f"Requested engine: {profile.engine}")
+        self.log_service.log_app(f"Resolved engine: {selected_engine}")
         self._validate_profile(profile, selected_engine)
 
         if progress:
+            if profile.engine == "auto" and profile.has_sftp_configuration() and profile.has_ftp_configuration():
+                progress(
+                    "Both SFTP and FTP settings are filled. Auto selected SFTP. "
+                    "Clear unused settings to avoid confusion."
+                )
             progress(f"Using {selected_engine} engine for {profile.name}.")
 
         if selected_engine == "local_copy":

@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFormLayout,
     QLabel,
     QLineEdit,
@@ -26,6 +25,7 @@ class SettingsPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._loaded_service_runner_mode = "internal_scheduler"
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -36,12 +36,10 @@ class SettingsPage(QWidget):
         self.run_as_service_checkbox = QCheckBox("Run as Service / Background Scheduler Mode")
         self.run_as_service_help = QLabel(
             "Service mode is intended for running scheduled backups without opening the desktop UI. "
-            "Installation requires OS-specific setup."
+            "Installation requires OS-specific setup.\n"
+            "To use service mode, set each profile Schedule Runner to Background Service Scheduler."
         )
         self.run_as_service_help.setWordWrap(True)
-        self.service_runner_mode_combo = QComboBox()
-        self.service_runner_mode_combo.addItem("Internal Scheduler Service", userData="internal_scheduler")
-        self.service_runner_mode_combo.addItem("External OS Scheduler", userData="external_os_scheduler")
         self.export_windows_service_button = QPushButton("Export Windows Service Task")
         self.export_linux_service_button = QPushButton("Export Linux systemd Service")
         self.export_help = QLabel("Exports generate helper files only. Nothing is installed automatically.")
@@ -55,7 +53,6 @@ class SettingsPage(QWidget):
         form.addRow("", self.auto_start_scheduler_checkbox)
         form.addRow("", self.run_as_service_checkbox)
         form.addRow("", self.run_as_service_help)
-        form.addRow("Service Runner Mode", self.service_runner_mode_combo)
 
         layout.addLayout(form)
         layout.addWidget(self.export_windows_service_button)
@@ -76,8 +73,7 @@ class SettingsPage(QWidget):
         self.default_mysqldump_path_edit.setText(settings.default_mysqldump_path)
         self.auto_start_scheduler_checkbox.setChecked(settings.auto_start_scheduler)
         self.run_as_service_checkbox.setChecked(settings.run_as_service)
-        index = self.service_runner_mode_combo.findData(settings.service_runner_mode)
-        self.service_runner_mode_combo.setCurrentIndex(index if index >= 0 else 0)
+        self._loaded_service_runner_mode = settings.service_runner_mode
 
     def set_status(self, message: str) -> None:
         """Show a save result message."""
@@ -90,6 +86,6 @@ class SettingsPage(QWidget):
             default_mysqldump_path=self.default_mysqldump_path_edit.text(),
             auto_start_scheduler=self.auto_start_scheduler_checkbox.isChecked(),
             run_as_service=self.run_as_service_checkbox.isChecked(),
-            service_runner_mode=str(self.service_runner_mode_combo.currentData()),
+            service_runner_mode=self._loaded_service_runner_mode,
         )
         self.save_requested.emit(settings)

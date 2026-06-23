@@ -15,6 +15,7 @@ from app.services.log_service import LogService
 from app.services.mysql_service import MySQLService
 from app.services.path_service import PathService
 from app.services.platform_service import PlatformService
+from app.services.remote_browser_service import RemoteBrowserService
 from app.services.restore_service import RestoreService
 from app.services.scheduler_service import SchedulerService
 from app.services.scheduler_service_runner import SchedulerServiceRunner
@@ -29,6 +30,7 @@ def build_runtime_services(path_service: PathService) -> dict[str, object]:
     backup_service = BackupService(repository, platform_service, log_service)
     restore_service = RestoreService(repository, mysql_service, log_service)
     scheduler_service = SchedulerService(SchedulerStateRepository(path_service.config_dir()))
+    remote_browser_service = RemoteBrowserService()
     external_scheduler_service = ExternalSchedulerService(
         app_script_path=None if path_service.is_frozen() else path_service.app_entry_path(),
         logs_dir=path_service.logs_dir(),
@@ -44,6 +46,7 @@ def build_runtime_services(path_service: PathService) -> dict[str, object]:
         "backup_service": backup_service,
         "restore_service": restore_service,
         "scheduler_service": scheduler_service,
+        "remote_browser_service": remote_browser_service,
         "external_scheduler_service": external_scheduler_service,
     }
 
@@ -62,19 +65,13 @@ def run_cli_mode(*, run_profile_id: str | None, run_profile_name: str | None) ->
 
 
 def run_scheduler_service_mode() -> int:
-    """Run the internal scheduler loop without starting Qt."""
+    """Run the service scheduler loop without starting Qt."""
     services = build_runtime_services(PathService())
-    settings = services["repository"].load_settings()
-    if settings.service_runner_mode != "internal_scheduler":
-        print(
-            "Service Runner Mode is set to External OS Scheduler; "
-            "--scheduler-service will still run the internal scheduler loop for internal profiles only."
-        )
-
     runner = SchedulerServiceRunner(
         services["backup_service"],
         services["scheduler_service"],
         services["log_service"],
+        runner_mode="service",
     )
     runner.run_forever()
     return 0
@@ -99,6 +96,7 @@ def start_desktop_app() -> int:
         log_service=services["log_service"],
         path_service=services["path_service"],
         external_scheduler_service=services["external_scheduler_service"],
+        remote_browser_service=services["remote_browser_service"],
     )
     window.show()
     return app.exec()

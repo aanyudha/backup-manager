@@ -7,20 +7,46 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 ScheduleType = Literal["manual", "daily", "weekly", "monthly"]
-ScheduleRunner = Literal["internal", "external"]
+ScheduleRunner = Literal["internal_app", "external_os", "service"]
+LEGACY_SCHEDULE_RUNNER_MAP = {
+    "internal": "internal_app",
+    "external": "external_os",
+}
+SCHEDULE_RUNNER_LABELS = {
+    "internal_app": "Internal App",
+    "external_os": "External OS",
+    "service": "Service",
+}
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def normalize_schedule_runner(value: str) -> ScheduleRunner:
+    """Normalize legacy runner names into the current schedule-runner values."""
+    cleaned = value.strip()
+    normalized = LEGACY_SCHEDULE_RUNNER_MAP.get(cleaned, cleaned)
+    if normalized not in SCHEDULE_RUNNER_LABELS:
+        raise ValueError(
+            "Schedule runner must be one of internal_app, external_os, or service."
+        )
+    return normalized  # type: ignore[return-value]
 
 
 class ScheduleFields(BaseModel):
     """Reusable schedule configuration stored on backup profiles."""
 
     schedule_enabled: bool = False
-    schedule_runner: ScheduleRunner = "internal"
+    schedule_runner: ScheduleRunner = "internal_app"
     schedule_type: ScheduleType = "manual"
     schedule_time: str | None = None
     schedule_days_of_week: list[int] = Field(default_factory=list)
     schedule_day_of_month: int | None = None
     run_if_missed: bool = True
+
+    @field_validator("schedule_runner", mode="before")
+    @classmethod
+    def validate_schedule_runner(cls, value: str) -> ScheduleRunner:
+        """Accept legacy runner values while persisting the normalized form."""
+        return normalize_schedule_runner(value)
 
     @field_validator("schedule_time")
     @classmethod

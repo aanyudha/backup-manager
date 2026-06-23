@@ -114,6 +114,14 @@ class FolderBackupProfile(BaseProfile):
     ftp_passive: bool = True
     rsync_extra_args: list[str] = Field(default_factory=list)
 
+    def has_sftp_configuration(self) -> bool:
+        """Return whether SFTP fields are populated enough to influence auto-detection."""
+        return bool(self.sftp_host or self.sftp_remote_path)
+
+    def has_ftp_configuration(self) -> bool:
+        """Return whether FTP fields are populated enough to influence auto-detection."""
+        return bool(self.ftp_host or self.ftp_remote_path)
+
     @field_validator("destination")
     @classmethod
     def validate_path_fields(cls, value: str) -> str:
@@ -158,9 +166,16 @@ class FolderBackupProfile(BaseProfile):
     @model_validator(mode="after")
     def validate_transport_fields(self) -> "FolderBackupProfile":
         """Validate engine-specific fields without forcing the UI to over-specialize."""
-        if self.engine != "ftp" and not self.source:
-            raise ValueError("Source is required unless the FTP engine is selected.")
-        if self.engine == "ftp":
+        validation_engine = self.engine
+        if validation_engine == "auto":
+            if self.has_sftp_configuration():
+                validation_engine = "sftp"
+            elif self.has_ftp_configuration():
+                validation_engine = "ftp"
+
+        if validation_engine not in {"ftp", "sftp"} and not self.source:
+            raise ValueError("Source is required unless the FTP or SFTP engine is selected.")
+        if validation_engine == "ftp":
             if not self.ftp_host:
                 raise ValueError("FTP host is required when engine=ftp.")
             if self.ftp_port <= 0:
@@ -169,6 +184,15 @@ class FolderBackupProfile(BaseProfile):
                 raise ValueError("FTP username is required when engine=ftp.")
             if not self.ftp_remote_path:
                 raise ValueError("FTP remote path is required when engine=ftp.")
+        if validation_engine == "sftp":
+            if not self.sftp_host:
+                raise ValueError("SFTP host is required when engine=sftp.")
+            if (self.sftp_port or 0) <= 0:
+                raise ValueError("SFTP port must be greater than 0.")
+            if not self.sftp_username:
+                raise ValueError("SFTP username is required when engine=sftp.")
+            if not self.sftp_remote_path:
+                raise ValueError("SFTP remote path is required when engine=sftp.")
         return self
 
 

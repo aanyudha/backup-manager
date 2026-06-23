@@ -42,5 +42,5 @@ class PlatformService:
         if not self.is_windows():
             warnings.append("Robocopy is available only on Windows.")
         if not self.command_exists("rsync"):
-            warnings.append("rsync is not installed; auto mode may fall back to local copy.")
+            warnings.append("rsync is not installed; rsync-style remote paths will not work.")
         return warnings

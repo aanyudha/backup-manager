@@ -39,14 +39,15 @@ python app.py
 
 1. Open the `MySQL Profiles` tab.
 2. Fill in the profile name, host, port, username, password, and destination folder.
-3. Optionally set a custom `mysqldump` path if it is not available on `PATH`.
+3. Optionally set a custom `mysqldump` path if it is not available on `PATH`, or leave it blank to auto-detect `mysqldump` from `PATH`.
 4. Choose `all`, `single`, or `multiple` for database mode.
 5. Optionally enable `Compress SQL backup as .sql.gz` for streamed gzip output.
 6. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
 7. Optionally enable `Enable Schedule`.
 8. Choose `Schedule Runner`:
-   - `Internal Scheduler` if the app should run the backup while it is open.
+   - `Internal App Scheduler` if the app should run the backup while it is open.
    - `External OS Scheduler` if Windows Task Scheduler or Linux cron should run the backup.
+   - `Background Service Scheduler` if `--scheduler-service` should run the backup without opening the GUI.
 9. Choose `manual`, `daily`, `weekly`, or `monthly`, and fill the matching schedule fields.
 10. Optionally leave `Run if missed` enabled so a missed daily, weekly, or monthly run still starts later that same day while the app is open.
 11. Use `Test Connection` to validate the credentials.
@@ -65,18 +66,28 @@ python app.py
 5. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
 6. Optionally enable `Enable Schedule`.
 7. Choose `Schedule Runner`:
-   - `Internal Scheduler` if the app should run the backup while it is open.
+   - `Internal App Scheduler` if the app should run the backup while it is open.
    - `External OS Scheduler` if Windows Task Scheduler or Linux cron should run the backup.
+   - `Background Service Scheduler` if `--scheduler-service` should run the backup without opening the GUI.
 8. Choose the schedule type, and fill the matching time, weekday, or day-of-month fields.
 9. Fill SFTP fields only when using an SFTP-based profile.
 10. Fill FTP fields only when using an FTP-based profile.
 11. For FTP in this MVP:
+   - FTP is plain FTP.
+   - Use SFTP for encrypted transfer.
    - Use a local destination folder.
    - Set `FTP Remote Path` to the remote source folder.
+   - Use `Browse FTP Folder` to pick the remote source folder.
    - Use `copy_new_changed` or `sync_without_delete`.
    - Do not use `mirror_with_delete`.
-12. Prefer SFTP over FTP when the server supports it.
-13. Click `Validate`, then `Save Profile`.
+12. For SFTP in this MVP:
+   - Set `SFTP Remote Path` to the remote source folder.
+   - Use `Browse SFTP Folder` to pick the remote source folder.
+13. Local source selection uses the `Source` field.
+14. FTP source selection uses `FTP Remote Path`.
+15. SFTP source selection uses `SFTP Remote Path`.
+16. Prefer SFTP over FTP when the server supports it.
+17. Click `Validate`, then `Save Profile`.
 
 ## How To Run a Backup
 
@@ -91,8 +102,9 @@ python app.py
 2. Edit or create a profile.
 3. Enable `Enable Schedule`.
 4. Choose `Schedule Runner`:
-   - `Internal Scheduler` keeps scheduling inside the app.
+   - `Internal App Scheduler` keeps scheduling inside the app.
    - `External OS Scheduler` is for exported Windows Task Scheduler or Linux cron jobs.
+   - `Background Service Scheduler` is for `--scheduler-service` mode.
 5. Choose one of these schedule types:
    - `manual` keeps the profile out of automatic runs.
    - `daily` uses the `Time` field.
@@ -107,7 +119,7 @@ python app.py
 1. Open the `Scheduler` tab.
 2. Use `Refresh` to reload last-run and next-run information.
 3. Use `Run Due Now` to perform an immediate due-profile check.
-4. Use `Start Scheduler` to begin the internal background loop.
+4. Use `Start Scheduler` to begin the internal-app background loop.
 5. Use `Stop Scheduler` to end the background loop.
 6. If you want it to start automatically on launch, open `Settings` and enable `Auto-start scheduler when app opens`.
 
@@ -126,7 +138,7 @@ python app.py
 
 1. Open the `Settings` tab.
 2. Optionally enable `Run as Service / Background Scheduler Mode`.
-3. Leave `Service Runner Mode` on `Internal Scheduler Service` if you want the `--scheduler-service` loop.
+3. Set each service-owned profile `Schedule Runner` to `Background Service Scheduler`.
 4. Click `Export Windows Service Task` to generate review-only Task Scheduler helper files in `exports/service/`.
 5. Click `Export Linux systemd Service` to generate a review-only systemd unit and install script in `exports/service/`.
 6. Review the generated files before running any privileged OS commands.

@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 from app.services.backup_service import BackupService
 from app.services.log_service import LogService
 from app.services.scheduler_service import SchedulerService
+from app.models.schedule import ScheduleRunner
 
 
 class SchedulerWorker(QObject):
@@ -29,6 +30,7 @@ class SchedulerWorker(QObject):
         *,
         interval_seconds: int = 60,
         run_once: bool = False,
+        runner_mode: ScheduleRunner = "internal_app",
     ) -> None:
         super().__init__()
         self.backup_service = backup_service
@@ -36,6 +38,7 @@ class SchedulerWorker(QObject):
         self.log_service = log_service
         self.interval_seconds = interval_seconds
         self.run_once = run_once
+        self.runner_mode = runner_mode
         self._stop_event = Event()
         self._wake_event = Event()
 
@@ -80,7 +83,8 @@ class SchedulerWorker(QObject):
         due_profiles = [
             profile
             for profile in profiles
-            if profile.schedule_runner == "internal" and self.scheduler_service.is_due(profile, now)
+            if profile.schedule_runner == self.runner_mode
+            and self.scheduler_service.is_due(profile, now, runner_mode=self.runner_mode)
         ]
 
         if not due_profiles:
