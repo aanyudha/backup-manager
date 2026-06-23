@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -67,19 +68,35 @@ class FolderProfilesPage(QWidget):
         scroll_area.setWidgetResizable(True)
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
-        form = QFormLayout()
 
         self.name_edit = QLineEdit()
+        self.source_type_combo = QComboBox()
+        self._add_choice(self.source_type_combo, "Local Folder", "local")
+        self._add_choice(self.source_type_combo, "FTP Remote Folder", "ftp")
+        self._add_choice(self.source_type_combo, "SFTP Remote Folder", "sftp")
+        self._add_choice(self.source_type_combo, "Rsync Remote/Path", "rsync")
+        self.destination_type_combo = QComboBox()
+        self._add_choice(self.destination_type_combo, "Local Folder", "local")
+        self._add_choice(self.destination_type_combo, "Network/Mounted Folder", "network")
         self.source_edit = QLineEdit()
         self.source_browse_button = QPushButton("Browse Source")
+        self.source_path_label = QLabel("Source Folder")
+        self.source_path_row = self._build_line_with_button(self.source_edit, self.source_browse_button)
+        self.source_helper_label = QLabel()
+        self.source_helper_label.setWordWrap(True)
         self.destination_edit = QLineEdit()
         self.destination_browse_button = QPushButton("Browse Destination")
         self.engine_combo = QComboBox()
         self.engine_combo.addItems(["auto", "local_copy", "robocopy", "rsync", "sftp", "ftp"])
         self.resolved_engine_value = QLabel("local_copy")
+        self.engine_helper_label = QLabel(
+            "Engine auto chooses the correct transport based on Source Type and path settings."
+        )
+        self.engine_helper_label.setWordWrap(True)
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["copy_new_changed", "sync_without_delete", "mirror_with_delete"])
         self.log_folder_edit = QLineEdit()
+
         self.sftp_host_edit = QLineEdit()
         self.sftp_port_edit = QLineEdit("22")
         self.sftp_username_edit = QLineEdit()
@@ -88,6 +105,7 @@ class FolderProfilesPage(QWidget):
         self.sftp_private_key_edit = QLineEdit()
         self.sftp_remote_path_edit = QLineEdit()
         self.sftp_browse_button = QPushButton("Browse SFTP Folder")
+
         self.ftp_host_edit = QLineEdit()
         self.ftp_port_edit = QLineEdit("21")
         self.ftp_username_edit = QLineEdit()
@@ -97,6 +115,15 @@ class FolderProfilesPage(QWidget):
         self.ftp_browse_button = QPushButton("Browse FTP Folder")
         self.ftp_passive_checkbox = QCheckBox("Use Passive Mode")
         self.ftp_passive_checkbox.setChecked(True)
+
+        self.destination_helper_label = QLabel(
+            "Network/Mounted Folder does not store credentials. Mount or login must be handled by the OS."
+        )
+        self.destination_helper_label.setWordWrap(True)
+        self.destination_limitation_label = QLabel(
+            "FTP/SFTP destination upload is not supported yet. Remote sources are copied to Local or Network/Mounted destinations."
+        )
+        self.destination_limitation_label.setWordWrap(True)
         self.rsync_args_edit = QLineEdit()
         self.enabled_checkbox = QCheckBox("Enabled")
         self.enabled_checkbox.setChecked(True)
@@ -109,42 +136,66 @@ class FolderProfilesPage(QWidget):
         self.warning_label.setWordWrap(True)
         self.schedule_fields = ScheduleFieldsSection()
 
-        form.addRow("Profile Name", self.name_edit)
-        form.addRow("Source", self._build_line_with_button(self.source_edit, self.source_browse_button))
-        form.addRow(
-            "Destination",
-            self._build_line_with_button(self.destination_edit, self.destination_browse_button),
-        )
-        form.addRow("Engine", self.engine_combo)
-        form.addRow("Resolved Engine", self.resolved_engine_value)
-        form.addRow("Mode", self.mode_combo)
-        form.addRow("Log Folder", self.log_folder_edit)
-        form.addRow(QLabel("SFTP Settings"))
-        form.addRow("SFTP Host", self.sftp_host_edit)
-        form.addRow("SFTP Port", self.sftp_port_edit)
-        form.addRow("SFTP Username", self.sftp_username_edit)
-        form.addRow("SFTP Password", self.sftp_password_edit)
-        form.addRow("SFTP Private Key", self.sftp_private_key_edit)
-        form.addRow(
-            "SFTP Remote Path",
+        transfer_group = QGroupBox("Transfer Direction")
+        transfer_form = QFormLayout(transfer_group)
+        transfer_form.addRow("Profile Name", self.name_edit)
+        transfer_form.addRow("Source Type", self.source_type_combo)
+        transfer_form.addRow("Engine", self.engine_combo)
+        transfer_form.addRow("Resolved Engine", self.resolved_engine_value)
+        transfer_form.addRow("", self.engine_helper_label)
+        transfer_form.addRow("Mode", self.mode_combo)
+        transfer_form.addRow("Log Folder", self.log_folder_edit)
+
+        self.source_group = QGroupBox("Source")
+        source_layout = QVBoxLayout(self.source_group)
+        source_layout.addWidget(self.source_helper_label)
+        self.source_path_group = QGroupBox("Local Source")
+        source_path_form = QFormLayout(self.source_path_group)
+        source_path_form.addRow(self.source_path_label, self.source_path_row)
+        self.sftp_source_group = QGroupBox("SFTP Source")
+        sftp_form = QFormLayout(self.sftp_source_group)
+        sftp_form.addRow("SFTP Host", self.sftp_host_edit)
+        sftp_form.addRow("SFTP Port", self.sftp_port_edit)
+        sftp_form.addRow("SFTP Username", self.sftp_username_edit)
+        sftp_form.addRow("SFTP Password", self.sftp_password_edit)
+        sftp_form.addRow("SFTP Private Key", self.sftp_private_key_edit)
+        sftp_form.addRow(
+            "SFTP Source Folder",
             self._build_line_with_button(self.sftp_remote_path_edit, self.sftp_browse_button),
         )
-        form.addRow(QLabel("FTP Settings (plain FTP only; use SFTP for encrypted transfer)"))
-        form.addRow("FTP Host", self.ftp_host_edit)
-        form.addRow("FTP Port", self.ftp_port_edit)
-        form.addRow("FTP Username", self.ftp_username_edit)
-        form.addRow("FTP Password", self.ftp_password_edit)
-        form.addRow(
-            "FTP Remote Path",
+        self.ftp_source_group = QGroupBox("FTP Source")
+        ftp_form = QFormLayout(self.ftp_source_group)
+        ftp_form.addRow("FTP Host", self.ftp_host_edit)
+        ftp_form.addRow("FTP Port", self.ftp_port_edit)
+        ftp_form.addRow("FTP Username", self.ftp_username_edit)
+        ftp_form.addRow("FTP Password", self.ftp_password_edit)
+        ftp_form.addRow(
+            "FTP Source Folder",
             self._build_line_with_button(self.ftp_remote_path_edit, self.ftp_browse_button),
         )
-        form.addRow("", self.ftp_passive_checkbox)
-        form.addRow("Rsync Extra Args", self.rsync_args_edit)
-        form.addRow("", self.enabled_checkbox)
-        form.addRow("", self.retention_checkbox)
-        form.addRow("Retention Days", self.retention_days_spin)
-        self.schedule_fields.add_to_form(form)
-        form.addRow("Compatibility", self.warning_label)
+        ftp_form.addRow("", self.ftp_passive_checkbox)
+        source_layout.addWidget(self.source_path_group)
+        source_layout.addWidget(self.ftp_source_group)
+        source_layout.addWidget(self.sftp_source_group)
+
+        destination_group = QGroupBox("Destination")
+        destination_form = QFormLayout(destination_group)
+        destination_form.addRow("Destination Type", self.destination_type_combo)
+        destination_form.addRow(
+            "Destination Folder",
+            self._build_line_with_button(self.destination_edit, self.destination_browse_button),
+        )
+        destination_form.addRow("", self.destination_helper_label)
+        destination_form.addRow("", self.destination_limitation_label)
+
+        options_group = QGroupBox("Options")
+        options_form = QFormLayout(options_group)
+        options_form.addRow("Rsync Extra Args", self.rsync_args_edit)
+        options_form.addRow("", self.enabled_checkbox)
+        options_form.addRow("", self.retention_checkbox)
+        options_form.addRow("Retention Days", self.retention_days_spin)
+        self.schedule_fields.add_to_form(options_form)
+        options_form.addRow("Compatibility", self.warning_label)
 
         button_grid = QGridLayout()
         self.validate_button = QPushButton("Validate")
@@ -162,7 +213,10 @@ class FolderProfilesPage(QWidget):
         self.status_output.setReadOnly(True)
         self.status_output.setMinimumHeight(100)
 
-        scroll_layout.addLayout(form)
+        scroll_layout.addWidget(transfer_group)
+        scroll_layout.addWidget(self.source_group)
+        scroll_layout.addWidget(destination_group)
+        scroll_layout.addWidget(options_group)
         scroll_layout.addStretch(1)
         scroll_area.setWidget(scroll_content)
         form_layout.addWidget(scroll_area)
@@ -184,13 +238,14 @@ class FolderProfilesPage(QWidget):
         self.engine_combo.currentTextChanged.connect(self._refresh_warning)
         self.engine_combo.currentTextChanged.connect(self._refresh_resolved_engine)
         self.mode_combo.currentTextChanged.connect(self._refresh_warning)
+        self.source_type_combo.currentIndexChanged.connect(self._refresh_source_ui)
+        self.source_type_combo.currentIndexChanged.connect(self._refresh_warning)
+        self.source_type_combo.currentIndexChanged.connect(self._refresh_resolved_engine)
+        self.destination_type_combo.currentIndexChanged.connect(self._refresh_warning)
+        self.destination_type_combo.currentIndexChanged.connect(self._refresh_resolved_engine)
         self.retention_checkbox.toggled.connect(self.retention_days_spin.setEnabled)
-        self.source_browse_button.clicked.connect(
-            lambda _checked=False: self._browse_local_folder(self.source_edit)
-        )
-        self.destination_browse_button.clicked.connect(
-            lambda _checked=False: self._browse_local_folder(self.destination_edit)
-        )
+        self.source_browse_button.clicked.connect(self._browse_source_folder)
+        self.destination_browse_button.clicked.connect(self._browse_destination_folder)
         self.ftp_browse_button.clicked.connect(self._browse_ftp_folder)
         self.sftp_browse_button.clicked.connect(self._browse_sftp_folder)
         for widget in (
@@ -203,8 +258,29 @@ class FolderProfilesPage(QWidget):
         ):
             widget.textChanged.connect(self._refresh_resolved_engine)
             widget.textChanged.connect(self._refresh_warning)
+        self._refresh_source_ui()
         self._refresh_warning()
         self._refresh_resolved_engine()
+
+    @staticmethod
+    def _add_choice(combo: QComboBox, label: str, value: str) -> None:
+        """Insert a combo-box option with a stable data value."""
+        combo.addItem(label, value)
+
+    @staticmethod
+    def _set_combo_value(combo: QComboBox, value: str) -> None:
+        """Select a combo-box entry by its user data."""
+        for index in range(combo.count()):
+            if combo.itemData(index) == value:
+                combo.setCurrentIndex(index)
+                return
+        combo.setCurrentIndex(0)
+
+    @staticmethod
+    def _current_combo_value(combo: QComboBox) -> str:
+        """Return the stable data value for a combo-box."""
+        value = combo.currentData()
+        return value if isinstance(value, str) else combo.currentText()
 
     @staticmethod
     def _build_line_with_button(line_edit: QLineEdit, button: QPushButton) -> QWidget:
@@ -214,6 +290,12 @@ class FolderProfilesPage(QWidget):
         layout.addWidget(line_edit)
         layout.addWidget(button)
         return container
+
+    def _current_source_type(self) -> str:
+        return self._current_combo_value(self.source_type_combo)
+
+    def _current_destination_type(self) -> str:
+        return self._current_combo_value(self.destination_type_combo)
 
     def set_profiles(self, profiles: list[FolderBackupProfile]) -> None:
         """Load folder profiles into the list."""
@@ -245,6 +327,8 @@ class FolderProfilesPage(QWidget):
     def clear_form(self) -> None:
         self._current_id = None
         self.name_edit.clear()
+        self._set_combo_value(self.source_type_combo, "local")
+        self._set_combo_value(self.destination_type_combo, "local")
         self.source_edit.clear()
         self.destination_edit.clear()
         self.engine_combo.setCurrentText("auto")
@@ -269,6 +353,7 @@ class FolderProfilesPage(QWidget):
         self.retention_days_spin.setEnabled(False)
         self.schedule_fields.clear()
         self.profile_list.clearSelection()
+        self._refresh_source_ui()
         self._refresh_warning()
         self._refresh_resolved_engine()
 
@@ -282,6 +367,8 @@ class FolderProfilesPage(QWidget):
 
         self._current_id = profile.id
         self.name_edit.setText(profile.name)
+        self._set_combo_value(self.source_type_combo, profile.source_type)
+        self._set_combo_value(self.destination_type_combo, profile.destination_type)
         self.source_edit.setText(profile.source)
         self.destination_edit.setText(profile.destination)
         self.engine_combo.setCurrentText(profile.engine)
@@ -305,6 +392,7 @@ class FolderProfilesPage(QWidget):
         self.retention_days_spin.setValue(profile.retention_days or 0)
         self.retention_days_spin.setEnabled(profile.retention_enabled)
         self.schedule_fields.load_profile(profile)
+        self._refresh_source_ui()
         self._refresh_warning()
         self._refresh_resolved_engine()
 
@@ -316,6 +404,8 @@ class FolderProfilesPage(QWidget):
         last_message = existing.last_message if existing else None
         payload = dict(
             name=self.name_edit.text(),
+            source_type=self._current_source_type(),
+            destination_type=self._current_destination_type(),
             source=self.source_edit.text(),
             destination=self.destination_edit.text(),
             engine=self.engine_combo.currentText(),
@@ -348,12 +438,40 @@ class FolderProfilesPage(QWidget):
             payload["id"] = existing.id
         return FolderBackupProfile(**payload)
 
+    def _refresh_source_ui(self, *_args) -> None:
+        source_type = self._current_source_type()
+        self.source_path_group.setVisible(source_type in {"local", "rsync"})
+        self.ftp_source_group.setVisible(source_type == "ftp")
+        self.sftp_source_group.setVisible(source_type == "sftp")
+        self.source_browse_button.setVisible(source_type == "local")
+        if source_type == "local":
+            self.source_path_group.setTitle("Local Source")
+            self.source_path_label.setText("Source Folder")
+            self.source_helper_label.setText("Local source uses the Source Folder path.")
+        elif source_type == "ftp":
+            self.source_helper_label.setText(
+                "FTP Source Folder is copied from the FTP server to the destination."
+            )
+        elif source_type == "sftp":
+            self.source_helper_label.setText(
+                "SFTP Source Folder is copied from the SFTP server to the destination."
+            )
+        else:
+            self.source_path_group.setTitle("Rsync Source")
+            self.source_path_label.setText("Source Path")
+            self.source_helper_label.setText(
+                "Use local path or remote syntax, for example user@host:/path"
+            )
+
     def _refresh_warning(self, *_args) -> None:
         warnings = self.platform_service.compatibility_warnings()
         engine = self.engine_combo.currentText()
+        source_type = self._current_source_type()
         effective_engine = FolderBackupEngine.resolve_engine_inputs(
             platform_service=self.platform_service,
             requested_engine=engine,
+            source_type=source_type,
+            destination_type=self._current_destination_type(),
             source=self.source_edit.text(),
             destination=self.destination_edit.text(),
             sftp_host=self.sftp_host_edit.text() or None,
@@ -363,9 +481,16 @@ class FolderProfilesPage(QWidget):
         )
         if self.engine_combo.currentText() == "auto" and self._has_sftp_configuration() and self._has_ftp_configuration():
             warnings.append(
-                "Both SFTP and FTP settings are filled. Auto selected SFTP. "
-                "Clear unused settings to avoid confusion."
+                "Both SFTP and FTP settings are filled. Auto selected SFTP. Clear unused settings to avoid confusion."
             )
+        if source_type == "ftp" and engine not in {"auto", "ftp"}:
+            warnings.append("FTP source requires Engine auto or ftp.")
+        if source_type == "sftp" and engine not in {"auto", "sftp"}:
+            warnings.append("SFTP source requires Engine auto or sftp.")
+        if source_type == "rsync" and engine not in {"auto", "rsync"}:
+            warnings.append("Rsync source requires Engine auto or rsync.")
+        if source_type == "local" and engine in {"ftp", "sftp"}:
+            warnings.append("FTP/SFTP engine requires remote source type.")
         if engine == "robocopy" and not self.platform_service.is_windows():
             warnings.append("Selected engine is not compatible with this OS.")
         if effective_engine == "sftp" and self.mode_combo.currentText() == "mirror_with_delete":
@@ -378,6 +503,8 @@ class FolderProfilesPage(QWidget):
         resolved = FolderBackupEngine.resolve_engine_inputs(
             platform_service=self.platform_service,
             requested_engine=self.engine_combo.currentText(),
+            source_type=self._current_source_type(),
+            destination_type=self._current_destination_type(),
             source=self.source_edit.text(),
             destination=self.destination_edit.text(),
             sftp_host=self.sftp_host_edit.text() or None,
@@ -411,10 +538,20 @@ class FolderProfilesPage(QWidget):
         self.append_status(message)
         QMessageBox.information(self, "Validate Profile", message)
 
-    def _browse_local_folder(self, target: QLineEdit) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "Select Folder", target.text() or "")
+    def _browse_source_folder(self) -> None:
+        selected = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.source_edit.text() or "")
         if selected:
-            target.setText(selected)
+            self._set_combo_value(self.source_type_combo, "local")
+            self.source_edit.setText(selected)
+
+    def _browse_destination_folder(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Select Destination Folder",
+            self.destination_edit.text() or "",
+        )
+        if selected:
+            self.destination_edit.setText(selected)
 
     def _browse_ftp_folder(self, *_args) -> None:
         if (
@@ -467,6 +604,7 @@ class FolderProfilesPage(QWidget):
             self._apply_sftp_remote_path(dialog.selected_path)
 
     def _apply_ftp_remote_path(self, remote_path: str) -> None:
+        self._set_combo_value(self.source_type_combo, "ftp")
         self.ftp_remote_path_edit.setText(remote_path)
         if self.engine_combo.currentText() not in {"auto", "ftp"}:
             message = "You selected an FTP remote folder, but Engine is not auto or ftp."
@@ -474,6 +612,7 @@ class FolderProfilesPage(QWidget):
             QMessageBox.warning(self, "Browse FTP Folder", message)
 
     def _apply_sftp_remote_path(self, remote_path: str) -> None:
+        self._set_combo_value(self.source_type_combo, "sftp")
         self.sftp_remote_path_edit.setText(remote_path)
         if self.engine_combo.currentText() not in {"auto", "sftp"}:
             message = "You selected an SFTP remote folder, but Engine is not auto or sftp."

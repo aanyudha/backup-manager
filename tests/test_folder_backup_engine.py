@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+import pytest
 
 from app.engines.folder_backup_engine import FolderBackupEngine
 from app.models.profile import FolderBackupProfile
@@ -48,11 +50,12 @@ def build_result(profile: FolderBackupProfile, message: str) -> BackupResult:
     )
 
 
-def test_auto_resolves_ftp_when_ftp_fields_exist(tmp_path: Path) -> None:
+def test_auto_resolves_ftp_when_source_type_is_ftp(tmp_path: Path) -> None:
     engine, _ = build_engine(tmp_path)
     profile = build_profile(
         tmp_path,
         source="",
+        source_type="ftp",
         ftp_host="ftp.example.com",
         ftp_username="backup",
         ftp_password="secret",
@@ -62,11 +65,12 @@ def test_auto_resolves_ftp_when_ftp_fields_exist(tmp_path: Path) -> None:
     assert engine.resolve_engine(profile) == "ftp"
 
 
-def test_auto_resolves_sftp_when_sftp_fields_exist(tmp_path: Path) -> None:
+def test_auto_resolves_sftp_when_source_type_is_sftp(tmp_path: Path) -> None:
     engine, _ = build_engine(tmp_path)
     profile = build_profile(
         tmp_path,
         source="",
+        source_type="sftp",
         sftp_host="sftp.example.com",
         sftp_username="backup",
         sftp_password="secret",
@@ -94,9 +98,13 @@ def test_auto_prefers_sftp_when_both_remote_configs_exist(tmp_path: Path) -> Non
     assert engine.resolve_engine(profile) == "sftp"
 
 
-def test_auto_resolves_rsync_when_source_looks_remote(tmp_path: Path) -> None:
+def test_auto_resolves_rsync_when_source_type_is_rsync(tmp_path: Path) -> None:
     engine, _ = build_engine(tmp_path)
-    profile = build_profile(tmp_path, source="backup@example.com:/srv/data")
+    profile = build_profile(
+        tmp_path,
+        source_type="rsync",
+        source="backup@example.com:/srv/data",
+    )
 
     assert engine.resolve_engine(profile) == "rsync"
 
@@ -122,8 +130,46 @@ def test_auto_falls_back_to_local_copy(tmp_path: Path, monkeypatch) -> None:
 def test_explicit_engine_values_are_preserved(tmp_path: Path) -> None:
     engine, _ = build_engine(tmp_path)
 
-    assert engine.resolve_engine(build_profile(tmp_path, engine="ftp", source="", ftp_host="ftp.example.com", ftp_username="backup", ftp_password="secret", ftp_remote_path="/exports")) == "ftp"
-    assert engine.resolve_engine(build_profile(tmp_path, engine="sftp", source="", sftp_host="sftp.example.com", sftp_username="backup", sftp_password="secret", sftp_remote_path="/exports")) == "sftp"
+    assert engine.resolve_engine(
+        build_profile(
+            tmp_path,
+            engine="ftp",
+            source="",
+            ftp_host="ftp.example.com",
+            ftp_username="backup",
+            ftp_password="secret",
+            ftp_remote_path="/exports",
+        )
+    ) == "ftp"
+    assert engine.resolve_engine(
+        build_profile(
+            tmp_path,
+            engine="sftp",
+            source="",
+            sftp_host="sftp.example.com",
+            sftp_username="backup",
+            sftp_password="secret",
+            sftp_remote_path="/exports",
+        )
+    ) == "sftp"
+
+
+def test_ftp_source_requires_auto_or_ftp_engine(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="FTP source requires Engine auto or ftp."):
+        build_profile(
+            tmp_path,
+            source="",
+            source_type="ftp",
+            engine="local_copy",
+            ftp_host="ftp.example.com",
+            ftp_username="backup",
+            ftp_remote_path="/exports",
+        )
+
+
+def test_local_source_rejects_ftp_engine(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="FTP/SFTP engine requires remote source type."):
+        build_profile(tmp_path, engine="ftp")
 
 
 def test_auto_with_ftp_fields_does_not_route_to_local_copy(tmp_path: Path, monkeypatch) -> None:
@@ -152,3 +198,58 @@ def test_auto_with_ftp_fields_does_not_route_to_local_copy(tmp_path: Path, monke
     result = engine.run(profile)
 
     assert result == expected
+
+
+def test_ftp_run_uses_ftp_remote_path_not_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, _ = build_engine(tmp_path)
+    destination = tmp_path / "network-destination"
+    profile = build_profile(
+        tmp_path,
+        source="C:/should-not-be-used",
+        source_type="ftp",
+        destination_type="network",
+        destination=str(destination),
+        ftp_host="ftp.example.com",
+        ftp_username="backup",
+        ftp_password="secret",
+        ftp_remote_path="/exports",
+    )
+    captured: dict[str, object] = {}
+
+    class DummyFtp:
+        def quit(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.transports.ftp_transport.FtpTransport._connect", lambda self, current: DummyFtp())
+
+    def fake_download(self, ftp, remote_root, local_root, logger):  # type: ignore[no-untyped-def]
+        captured["remote_root"] = remote_root
+        captured["local_root"] = local_root
+        return 0
+
+    monkeypatch.setattr("app.transports.ftp_transport.FtpTransport._download_tree", fake_download)
+
+    result = engine.run(profile)
+
+    assert result.success is True
+    assert captured["remote_root"] == PurePosixPath("/exports")
+    assert captured["local_root"] == destination
+
+
+def test_auto_logs_requested_and_resolved_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, _ = build_engine(tmp_path)
+    profile = build_profile(tmp_path)
+    source_dir = Path(profile.source)
+    source_dir.mkdir(parents=True, exist_ok=True)
+    app_log_messages: list[str] = []
+
+    monkeypatch.setattr(engine.log_service, "log_app", lambda message: app_log_messages.append(message))
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.LocalCopyTransport.run",
+        lambda self, current_profile, progress=None: build_result(current_profile, "Copied 0 file(s)"),
+    )
+
+    engine.run(profile)
+
+    assert "Requested engine: auto" in app_log_messages
+    assert any(message.startswith("Resolved engine: ") for message in app_log_messages)

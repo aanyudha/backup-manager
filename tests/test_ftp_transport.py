@@ -110,6 +110,7 @@ def test_folder_profile_serialization_round_trips_ftp_fields(tmp_path: Path) -> 
 
     assert isinstance(restored, FolderBackupProfile)
     assert "ftp_tls" not in serialized
+    assert restored.source_type == "ftp"
     assert restored.engine == "ftp"
     assert restored.ftp_host == "ftp.example.com"
     assert restored.ftp_port == 21

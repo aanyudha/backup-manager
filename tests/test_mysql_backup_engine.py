@@ -225,6 +225,7 @@ def test_compressed_mysql_backup_creates_sql_gz_output(
     engine = MySQLBackupEngine(LogService(tmp_path))
     profile = build_mysql_profile(tmp_path)
     profile.compress = True
+    profile.destination_type = "network"
     stub_versions(monkeypatch, engine)
 
     monkeypatch.setattr("app.services.compression_service.subprocess.Popen", FakeStreamingPopen)
@@ -235,6 +236,7 @@ def test_compressed_mysql_backup_creates_sql_gz_output(
     assert result.output_file is not None
     assert result.output_file.endswith(".sql.gz")
     assert Path(result.output_file).exists()
+    assert Path(result.output_file).parent == Path(profile.destination)
 
 
 def test_uncompressed_mysql_backup_keeps_sql_output(
@@ -281,3 +283,23 @@ def test_compression_failure_marks_backup_failed(
 
     assert result.success is False
     assert result.message.startswith("MySQL backup failed: Compression error:")
+
+
+def test_mysql_backup_fails_early_if_destination_is_unwritable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Destination access errors should stop the backup before mysqldump starts."""
+    engine = MySQLBackupEngine(LogService(tmp_path))
+    profile = build_mysql_profile(tmp_path)
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (
+            False,
+            f"Destination folder is not accessible or writable: {path}",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Destination folder is not accessible or writable"):
+        engine.run(profile)

@@ -205,7 +205,7 @@ class FtpTransport(BaseTransport):
 
         local_destination = Path(profile.destination).expanduser()
         local_destination.mkdir(parents=True, exist_ok=True)
-        remote_root = PurePosixPath(profile.ftp_remote_path or profile.source or "/")
+        remote_root = PurePosixPath(profile.ftp_remote_path or "/")
         connection_summary = self._connection_summary(profile)
         logger.info("Starting FTP download: %s (passive=%s)", connection_summary, profile.ftp_passive)
         if progress:

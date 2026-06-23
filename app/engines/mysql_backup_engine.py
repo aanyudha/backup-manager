@@ -16,6 +16,7 @@ from app.models.profile import MySQLBackupProfile
 from app.models.result import BackupResult
 from app.services.compression_service import CompressionService, CompressionServiceError
 from app.services.log_service import LogService
+from app.services.path_validation_service import PathValidationService
 
 FATAL_STDERR_PATTERNS = (
     "access denied",
@@ -53,9 +54,11 @@ class MySQLBackupEngine(BaseBackupEngine):
         self,
         log_service: LogService,
         compression_service: CompressionService | None = None,
+        path_validation_service: PathValidationService | None = None,
     ) -> None:
         self.log_service = log_service
         self.compression_service = compression_service or CompressionService()
+        self.path_validation_service = path_validation_service or PathValidationService()
 
     def resolve_mysqldump(self, profile: MySQLBackupProfile) -> str:
         """Resolve the mysqldump executable path."""
@@ -236,8 +239,13 @@ class MySQLBackupEngine(BaseBackupEngine):
         """Execute a mysqldump process and persist the SQL output."""
         started_at = datetime.now(timezone.utc)
         logger, log_path = self.log_service.create_backup_logger(profile.name, started_at)
+        destination_ok, destination_message = self.path_validation_service.validate_destination_path(
+            profile.destination,
+            profile.destination_type,
+        )
+        if not destination_ok:
+            raise RuntimeError(destination_message)
         destination_dir = Path(profile.destination).expanduser()
-        destination_dir.mkdir(parents=True, exist_ok=True)
         output_path = self.compression_service.build_mysql_output_path(
             destination_dir=destination_dir,
             safe_profile_name=self.log_service.safe_name(profile.name),

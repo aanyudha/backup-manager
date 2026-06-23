@@ -27,6 +27,8 @@ def test_mysql_profiles_page_exposes_expanding_database_list() -> None:
     assert database_list.minimumHeight() >= 160
     assert "auto-detect mysqldump from PATH" in page.mysqldump_help_label.text()
     assert "engine auto" not in page.mysqldump_help_label.text().lower()
+    assert page.destination_type_combo.itemText(1) == "Network/Mounted Folder"
+    assert "Credentials/mounting are handled by the OS" in page.destination_helper_label.text()
 
     page.close()
     app.quit()
@@ -110,6 +112,24 @@ def test_loading_profile_restores_single_database_selection() -> None:
     page.set_profiles([profile])
 
     assert page.get_selected_databases() == ["appdb"]
+
+    page.close()
+    app.quit()
+
+
+def test_collect_form_data_persists_network_destination_type() -> None:
+    app = QApplication.instance() or QApplication([])
+    page = MySQLProfilesPage(StubMySQLService())
+    page.name_edit.setText("Primary DB")
+    page.host_edit.setText("127.0.0.1")
+    page.username_edit.setText("root")
+    page.destination_type_combo.setCurrentIndex(1)
+    page.destination_edit.setText(r"\\server\share\backup")
+
+    collected = page._collect_form_data()
+
+    assert collected.destination_type == "network"
+    assert collected.destination == r"\\server\share\backup"
 
     page.close()
     app.quit()

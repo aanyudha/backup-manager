@@ -74,7 +74,7 @@ class SftpTransport(BaseTransport):
 
         local_destination = Path(profile.destination).expanduser()
         local_destination.mkdir(parents=True, exist_ok=True)
-        remote_root = PurePosixPath(profile.sftp_remote_path or profile.source)
+        remote_root = PurePosixPath(profile.sftp_remote_path or "/")
         if progress:
             progress(f"Downloading from SFTP {profile.sftp_host}:{remote_root}...")
 
@@ -99,4 +99,3 @@ class SftpTransport(BaseTransport):
             log_file=str(log_path),
             output_file=str(local_destination),
         )
-

@@ -8,9 +8,11 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -62,7 +64,15 @@ class MySQLProfilesPage(QWidget):
         self.mysqldump_path_edit.setPlaceholderText("Leave blank to auto-detect mysqldump from PATH")
         self.mysqldump_help_label = QLabel("Leave blank to auto-detect mysqldump from PATH.")
         self.mysqldump_help_label.setWordWrap(True)
+        self.destination_type_combo = QComboBox()
+        self.destination_type_combo.addItem("Local Folder", "local")
+        self.destination_type_combo.addItem("Network/Mounted Folder", "network")
         self.destination_edit = QLineEdit()
+        self.destination_browse_button = QPushButton("Browse Destination")
+        self.destination_helper_label = QLabel(
+            "Network/Mounted Folder supports Windows UNC paths, mapped drives, or Linux mounted shares. Credentials/mounting are handled by the OS."
+        )
+        self.destination_helper_label.setWordWrap(True)
         self.database_mode_combo = QComboBox()
         self.database_mode_combo.addItems(["all", "single", "multiple"])
         self.database_list = QListWidget()
@@ -131,7 +141,12 @@ class MySQLProfilesPage(QWidget):
         output_form = QFormLayout()
         output_form.addRow("mysqldump Path", self.mysqldump_path_edit)
         output_form.addRow("", self.mysqldump_help_label)
-        output_form.addRow("Destination Folder", self.destination_edit)
+        output_form.addRow("Destination Type", self.destination_type_combo)
+        output_form.addRow(
+            "Destination Folder",
+            self._build_line_with_button(self.destination_edit, self.destination_browse_button),
+        )
+        output_form.addRow("", self.destination_helper_label)
         output_form.addRow("", self.enabled_checkbox)
         output_form.addRow("", self.compress_checkbox)
         output_form.addRow("", self.retention_checkbox)
@@ -170,6 +185,32 @@ class MySQLProfilesPage(QWidget):
         self.run_button.clicked.connect(self._run_profile)
         self.new_button.clicked.connect(self.clear_form)
         self.retention_checkbox.toggled.connect(self.retention_days_spin.setEnabled)
+        self.destination_browse_button.clicked.connect(self._browse_destination_folder)
+
+    @staticmethod
+    def _build_line_with_button(line_edit: QLineEdit, button: QPushButton) -> QWidget:
+        """Render a path field and browse button on one row."""
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(line_edit)
+        layout.addWidget(button)
+        return container
+
+    @staticmethod
+    def _set_combo_value(combo: QComboBox, value: str) -> None:
+        """Select a combo-box entry by its stored data value."""
+        for index in range(combo.count()):
+            if combo.itemData(index) == value:
+                combo.setCurrentIndex(index)
+                return
+        combo.setCurrentIndex(0)
+
+    @staticmethod
+    def _current_combo_value(combo: QComboBox) -> str:
+        """Return the stored data value for a combo box."""
+        value = combo.currentData()
+        return value if isinstance(value, str) else combo.currentText()
 
     def set_profiles(self, profiles: list[MySQLBackupProfile]) -> None:
         """Load profiles into the page list."""
@@ -209,6 +250,7 @@ class MySQLProfilesPage(QWidget):
         self.username_edit.clear()
         self.password_edit.clear()
         self.mysqldump_path_edit.clear()
+        self._set_combo_value(self.destination_type_combo, "local")
         self.destination_edit.clear()
         self.database_mode_combo.setCurrentText("all")
         self.database_list.clear()
@@ -235,6 +277,7 @@ class MySQLProfilesPage(QWidget):
         self.username_edit.setText(profile.username)
         self.password_edit.setText(profile.password)
         self.mysqldump_path_edit.setText(profile.mysqldump_path or "")
+        self._set_combo_value(self.destination_type_combo, profile.destination_type)
         self.destination_edit.setText(profile.destination)
         self.database_mode_combo.setCurrentText(profile.database_mode)
         self.enabled_checkbox.setChecked(profile.enabled)
@@ -313,6 +356,7 @@ class MySQLProfilesPage(QWidget):
             database_mode=self.database_mode_combo.currentText(),
             databases=selected_databases,
             mysqldump_path=self.mysqldump_path_edit.text() or None,
+            destination_type=self._current_combo_value(self.destination_type_combo),
             destination=self.destination_edit.text(),
             compress=self.compress_checkbox.isChecked(),
             enabled=self.enabled_checkbox.isChecked(),
@@ -328,6 +372,16 @@ class MySQLProfilesPage(QWidget):
         if existing:
             payload["id"] = existing.id
         return MySQLBackupProfile(**payload)
+
+    def _browse_destination_folder(self) -> None:
+        """Open a local folder picker for the destination path."""
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Select Destination Folder",
+            self.destination_edit.text() or "",
+        )
+        if selected:
+            self.destination_edit.setText(selected)
 
     def _test_connection(self) -> None:
         success, message = self.mysql_service.test_connection(

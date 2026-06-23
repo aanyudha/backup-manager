@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Literal, TypeAlias
 from uuid import uuid4
@@ -9,11 +10,61 @@ from uuid import uuid4
 from pydantic import Field, field_validator, model_validator
 
 from app.models.schedule import ScheduleFields
+from app.services.path_validation_service import PathValidationService
 
 
 def utc_now() -> datetime:
     """Return a timezone-aware UTC timestamp."""
     return datetime.now(timezone.utc)
+
+
+FolderSourceType: TypeAlias = Literal["local", "ftp", "sftp", "rsync"]
+DestinationType: TypeAlias = Literal["local", "network"]
+
+
+def _clean_optional_text(value: object) -> str | None:
+    """Normalize possibly-blank text values for inference helpers."""
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _looks_like_rsync_remote(value: str) -> bool:
+    """Return whether a path resembles rsync remote syntax."""
+    cleaned = value.strip()
+    if not cleaned or cleaned.startswith("\\\\"):
+        return False
+    if re.match(r"^[A-Za-z]:[\\/]", cleaned):
+        return False
+    return bool(
+        re.match(r"^[^@\s:/\\]+@[^:\s]+:.+", cleaned)
+        or re.match(r"^[A-Za-z0-9._-]+:.+", cleaned)
+    )
+
+
+def _infer_destination_type(destination: object) -> str:
+    """Infer destination type for older profiles that do not store it explicitly."""
+    destination_text = _clean_optional_text(destination)
+    if not destination_text:
+        return "local"
+    if PathValidationService.is_unc_path(destination_text):
+        return "network"
+    if PathValidationService.is_linux_mount_like_path(destination_text):
+        return "network"
+    return "local"
+
+
+def _infer_folder_source_type(data: dict) -> str:
+    """Infer source type for older folder profiles that predate source_type."""
+    if _clean_optional_text(data.get("sftp_host")) or _clean_optional_text(data.get("sftp_remote_path")):
+        return "sftp"
+    if _clean_optional_text(data.get("ftp_host")) or _clean_optional_text(data.get("ftp_remote_path")):
+        return "ftp"
+    source = _clean_optional_text(data.get("source")) or ""
+    if _looks_like_rsync_remote(source):
+        return "rsync"
+    return "local"
 
 
 class BaseProfile(ScheduleFields):
@@ -62,7 +113,19 @@ class MySQLBackupProfile(BaseProfile):
     databases: list[str] = Field(default_factory=list)
     mysqldump_path: str | None = None
     destination: str
+    destination_type: DestinationType = "local"
     compress: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_destination_type_defaults(cls, data: object) -> object:
+        """Backfill destination_type for profiles created before the field existed."""
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        if not _clean_optional_text(payload.get("destination_type")):
+            payload["destination_type"] = _infer_destination_type(payload.get("destination"))
+        return payload
 
     @field_validator("host", "username", "destination")
     @classmethod
@@ -95,6 +158,8 @@ class FolderBackupProfile(BaseProfile):
     type: Literal["folder"] = "folder"
     source: str = ""
     destination: str
+    source_type: FolderSourceType = "local"
+    destination_type: DestinationType = "local"
     engine: Literal["auto", "local_copy", "robocopy", "rsync", "sftp", "ftp"] = "auto"
     mode: Literal["copy_new_changed", "sync_without_delete", "mirror_with_delete"] = (
         "copy_new_changed"
@@ -113,6 +178,19 @@ class FolderBackupProfile(BaseProfile):
     ftp_remote_path: str | None = None
     ftp_passive: bool = True
     rsync_extra_args: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_transport_defaults(cls, data: object) -> object:
+        """Backfill source and destination types for older folder profiles."""
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        if not _clean_optional_text(payload.get("source_type")):
+            payload["source_type"] = _infer_folder_source_type(payload)
+        if not _clean_optional_text(payload.get("destination_type")):
+            payload["destination_type"] = _infer_destination_type(payload.get("destination"))
+        return payload
 
     def has_sftp_configuration(self) -> bool:
         """Return whether SFTP fields are populated enough to influence auto-detection."""
@@ -166,15 +244,27 @@ class FolderBackupProfile(BaseProfile):
     @model_validator(mode="after")
     def validate_transport_fields(self) -> "FolderBackupProfile":
         """Validate engine-specific fields without forcing the UI to over-specialize."""
+        if self.source_type == "ftp" and self.engine not in {"auto", "ftp"}:
+            raise ValueError("FTP source requires Engine auto or ftp.")
+        if self.source_type == "sftp" and self.engine not in {"auto", "sftp"}:
+            raise ValueError("SFTP source requires Engine auto or sftp.")
+        if self.source_type == "rsync" and self.engine not in {"auto", "rsync"}:
+            raise ValueError("Rsync source requires Engine auto or rsync.")
+        if self.source_type == "local" and self.engine in {"ftp", "sftp"}:
+            raise ValueError("FTP/SFTP engine requires remote source type.")
+
+        if self.source_type in {"local", "rsync"} and not self.source:
+            raise ValueError("Source is required for Local Folder and Rsync sources.")
+
         validation_engine = self.engine
         if validation_engine == "auto":
-            if self.has_sftp_configuration():
+            if self.source_type == "sftp" or self.has_sftp_configuration():
                 validation_engine = "sftp"
-            elif self.has_ftp_configuration():
+            elif self.source_type == "ftp" or self.has_ftp_configuration():
                 validation_engine = "ftp"
+            elif self.source_type == "rsync" or _looks_like_rsync_remote(self.source):
+                validation_engine = "rsync"
 
-        if validation_engine not in {"ftp", "sftp"} and not self.source:
-            raise ValueError("Source is required unless the FTP or SFTP engine is selected.")
         if validation_engine == "ftp":
             if not self.ftp_host:
                 raise ValueError("FTP host is required when engine=ftp.")

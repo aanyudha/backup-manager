@@ -250,6 +250,9 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 
 - `robocopy` is used automatically for local or UNC folder backups when it is available.
 - UNC paths are supported by the folder backup engine.
+- Network destinations can use UNC paths such as `\\server\share\backup` or mapped drives such as `Z:\backup`.
+- Mapped drives are user-session dependent and may not exist for scheduled or service runs.
+- Prefer UNC paths for Windows Task Scheduler and service-style backups.
 - You can optionally set a custom `mysqldump` path in the profile or in settings.
 - Leave the profile `mysqldump Path` blank to auto-detect `mysqldump` from `PATH`.
 
@@ -258,6 +261,7 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - `rsync` is preferred for automatic folder backups when it is installed.
 - If `rsync` is not installed, the app falls back to the built-in local copy transport.
 - `robocopy` is never offered on Linux.
+- Network destinations can use mounted filesystem paths such as `/mnt/backup` or `/media/nas/backup`.
 
 ## MySQL Backup Notes
 
@@ -265,6 +269,9 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - The app supports backing up all databases, a single database, or multiple databases.
 - MySQL passwords are masked in logs and UI output.
 - MySQL backups can optionally stream directly to `.sql.gz` without first writing a large `.sql` file.
+- MySQL `Destination Type` can be `Local Folder` or `Network/Mounted Folder`.
+- `Network/Mounted Folder` means an OS-accessible filesystem path. The app does not mount shares or store SMB credentials.
+- Leave the profile `mysqldump Path` blank to auto-detect `mysqldump` from `PATH`.
 
 ## Compression
 
@@ -302,6 +309,15 @@ Folder backup outputs are directories. In v0.2.0, SHA256 and retention are appli
 
 ## Folder Backup Notes
 
+- Folder `Source Type` can be `Local Folder`, `FTP Remote Folder`, `SFTP Remote Folder`, or `Rsync Remote/Path`.
+- Local source uses `Source Folder`.
+- FTP source uses `FTP Source Folder`.
+- SFTP source uses `SFTP Source Folder`.
+- Rsync source uses the `Source Path` field and can use remote syntax such as `user@host:/path`.
+- Folder `Destination Type` can be `Local Folder` or `Network/Mounted Folder`.
+- `Network/Mounted Folder` means an OS-accessible path such as `\\server\share\backup`, `Z:\backup`, `/mnt/backup`, or `/media/nas/backup`.
+- The app does not mount network shares, store SMB credentials, or automate network logins.
+- For scheduled or service backups, make sure the destination path is already accessible to the user account that runs the backup.
 - `copy_new_changed` copies only new or updated files.
 - `sync_without_delete` keeps destination-only files intact.
 - `mirror_with_delete` deletes destination-only files for supported transports.
@@ -311,12 +327,12 @@ Folder backup outputs are directories. In v0.2.0, SHA256 and retention are appli
 
 - FTP is plain FTP in this MVP.
 - Use SFTP for encrypted transfer.
-- FTP support in this MVP is remote source to local destination only.
+- FTP support in this MVP is remote source to local or network-mounted destination only.
 - FTP downloads new or changed files recursively and preserves the remote directory structure.
 - `mirror_with_delete` is intentionally unsupported for FTP in the MVP.
 - Browse remote FTP source folders with `Browse FTP Folder`.
-- Local source selection uses the `Source` field.
-- FTP source selection uses `FTP Remote Path`.
+- Local source selection uses `Source Folder`.
+- FTP source selection uses `FTP Source Folder`.
 - FTP is less secure than SFTP and should be used only when SFTP is unavailable.
 - SFTP is the recommended remote transport when available.
 
@@ -329,16 +345,17 @@ Folder backup outputs are directories. In v0.2.0, SHA256 and retention are appli
 
 ## SFTP Notes
 
-- MVP support covers remote source to local destination downloads.
+- MVP support covers remote source to local or network-mounted destination downloads.
 - New and changed files are downloaded recursively.
 - `mirror_with_delete` is intentionally unsupported for SFTP in the MVP.
 - Browse remote SFTP source folders with `Browse SFTP Folder`.
-- Local source selection uses the `Source` field.
-- SFTP source selection uses `SFTP Remote Path`.
+- Local source selection uses `Source Folder`.
+- SFTP source selection uses `SFTP Source Folder`.
 
 ## Rsync Notes
 
 - Local and remote rsync syntax is supported.
+- If `Destination Type` is `Network/Mounted Folder`, the destination is treated as a normal filesystem path even when it contains network-style syntax.
 - Extra rsync arguments can be added per profile.
 - The app returns a clear validation error when `rsync` is not installed.
 
@@ -352,6 +369,7 @@ For the MVP, passwords may be stored in `config/profiles.json`. This is convenie
 - Do not commit `config/profiles.json` or `config/settings.json`.
 - Do not commit generated files in `exports/`.
 - Do not commit generated backup artifacts such as `.sql` or `.sql.gz` files.
+- The app does not log FTP, SFTP, MySQL, or SMB passwords in plaintext.
 
 ## Restore MVP Limitations
 
@@ -359,6 +377,9 @@ For the MVP, passwords may be stored in `config/profiles.json`. This is convenie
 - No incremental restore
 - No database diff
 - No folder versioning
+- FTP/SFTP remote destination upload is not supported yet.
+- SMB credential management is not implemented yet.
+- Network mount automation is not implemented yet.
 
 ## License
 

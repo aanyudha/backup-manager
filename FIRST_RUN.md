@@ -38,56 +38,96 @@ python app.py
 ## How To Create a MySQL Profile
 
 1. Open the `MySQL Profiles` tab.
-2. Fill in the profile name, host, port, username, password, and destination folder.
-3. Optionally set a custom `mysqldump` path if it is not available on `PATH`, or leave it blank to auto-detect `mysqldump` from `PATH`.
-4. Choose `all`, `single`, or `multiple` for database mode.
-5. Optionally enable `Compress SQL backup as .sql.gz` for streamed gzip output.
-6. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
-7. Optionally enable `Enable Schedule`.
-8. Choose `Schedule Runner`:
+2. Fill in the profile name, host, port, username, and password.
+3. Choose `Destination Type`:
+   - `Local Folder`
+   - `Network/Mounted Folder`
+4. Enter the destination folder.
+5. Network destination examples:
+   - Windows UNC: `\\server\share\backup`
+   - Windows mapped drive: `Z:\backup`
+   - Linux mounted share: `/mnt/backup`
+   - Linux mounted share: `/media/nas/backup`
+6. Make sure the destination path is already accessible to the OS user that will run the backup.
+7. The app does not mount shares or store SMB credentials for you.
+8. Optionally set a custom `mysqldump` path if it is not available on `PATH`, or leave it blank to auto-detect `mysqldump` from `PATH`.
+9. Choose `all`, `single`, or `multiple` for database mode.
+10. Optionally enable `Compress SQL backup as .sql.gz` for streamed gzip output.
+11. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
+12. Optionally enable `Enable Schedule`.
+13. Choose `Schedule Runner`:
    - `Internal App Scheduler` if the app should run the backup while it is open.
    - `External OS Scheduler` if Windows Task Scheduler or Linux cron should run the backup.
    - `Background Service Scheduler` if `--scheduler-service` should run the backup without opening the GUI.
-9. Choose `manual`, `daily`, `weekly`, or `monthly`, and fill the matching schedule fields.
-10. Optionally leave `Run if missed` enabled so a missed daily, weekly, or monthly run still starts later that same day while the app is open.
-11. Use `Test Connection` to validate the credentials.
-12. Use `Load Database List` to fetch selectable databases.
-13. Click `Save Profile`.
+14. Choose `manual`, `daily`, `weekly`, or `monthly`, and fill the matching schedule fields.
+15. Optionally leave `Run if missed` enabled so a missed daily, weekly, or monthly run still starts later that same day while the app is open.
+16. Use `Test Connection` to validate the credentials.
+17. Use `Load Database List` to fetch selectable databases.
+18. Click `Save Profile`.
 
 ## How To Create a Folder Profile
 
 1. Open the `Folder Profiles` tab.
-2. Enter the profile name, source path, and destination path.
-3. Choose `auto` unless you need a specific engine.
-4. Choose a mode:
+2. Enter the profile name.
+3. Choose `Source Type`:
+   - `Local Folder`
+   - `FTP Remote Folder`
+   - `SFTP Remote Folder`
+   - `Rsync Remote/Path`
+4. Choose `Destination Type`:
+   - `Local Folder`
+   - `Network/Mounted Folder`
+5. For `Local Folder` source:
+   - Use `Source Folder`.
+   - Use `Browse Source` if you want to pick a local folder.
+6. For `FTP Remote Folder` source:
+   - Fill the FTP connection fields.
+   - Set `FTP Source Folder`.
+   - Use `Browse FTP Folder` to pick the remote source folder.
+7. For `SFTP Remote Folder` source:
+   - Fill the SFTP connection fields.
+   - Set `SFTP Source Folder`.
+   - Use `Browse SFTP Folder` to pick the remote source folder.
+8. For `Rsync Remote/Path` source:
+   - Use `Source Path`.
+   - You can use local paths or remote syntax such as `user@host:/path`.
+9. Enter the destination folder.
+10. Network destination examples:
+   - Windows UNC: `\\server\share\backup`
+   - Windows mapped drive: `Z:\backup`
+   - Linux mounted share: `/mnt/backup`
+   - Linux mounted share: `/media/nas/backup`
+11. Make sure the destination path is already accessible before running the backup.
+12. For scheduled or service backups, prefer UNC paths because mapped drives may not exist in that session.
+13. Choose `auto` unless you need a specific engine.
+14. Choose a mode:
    - `copy_new_changed`
    - `sync_without_delete`
    - `mirror_with_delete`
-5. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
-6. Optionally enable `Enable Schedule`.
-7. Choose `Schedule Runner`:
+15. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
+16. Optionally enable `Enable Schedule`.
+17. Choose `Schedule Runner`:
    - `Internal App Scheduler` if the app should run the backup while it is open.
    - `External OS Scheduler` if Windows Task Scheduler or Linux cron should run the backup.
    - `Background Service Scheduler` if `--scheduler-service` should run the backup without opening the GUI.
-8. Choose the schedule type, and fill the matching time, weekday, or day-of-month fields.
-9. Fill SFTP fields only when using an SFTP-based profile.
-10. Fill FTP fields only when using an FTP-based profile.
-11. For FTP in this MVP:
+18. Choose the schedule type, and fill the matching time, weekday, or day-of-month fields.
+19. For FTP in this MVP:
    - FTP is plain FTP.
    - Use SFTP for encrypted transfer.
-   - Use a local destination folder.
-   - Set `FTP Remote Path` to the remote source folder.
+   - Remote FTP destination upload is not supported.
+   - Remote FTP sources copy to local or network-mounted destination folders only.
+   - Set `FTP Source Folder` to the remote source folder.
    - Use `Browse FTP Folder` to pick the remote source folder.
    - Use `copy_new_changed` or `sync_without_delete`.
    - Do not use `mirror_with_delete`.
-12. For SFTP in this MVP:
-   - Set `SFTP Remote Path` to the remote source folder.
+20. For SFTP in this MVP:
+   - Remote SFTP destination upload is not supported.
+   - Remote SFTP sources copy to local or network-mounted destination folders only.
+   - Set `SFTP Source Folder` to the remote source folder.
    - Use `Browse SFTP Folder` to pick the remote source folder.
-13. Local source selection uses the `Source` field.
-14. FTP source selection uses `FTP Remote Path`.
-15. SFTP source selection uses `SFTP Remote Path`.
-16. Prefer SFTP over FTP when the server supports it.
-17. Click `Validate`, then `Save Profile`.
+21. The app does not mount network shares or store SMB credentials for folder destinations.
+22. Prefer SFTP over FTP when the server supports it.
+23. Click `Validate`, then `Save Profile`.
 
 ## How To Run a Backup
 
@@ -218,6 +258,9 @@ python -m PyInstaller --noconfirm --windowed --name HeisenbergBackupManager app.
 - Users should not commit `config/profiles.json` and `config/settings.json`.
 - FTP `mirror_with_delete` is not supported in the MVP.
 - SFTP `mirror_with_delete` is not supported in the MVP.
+- FTP/SFTP remote destination upload is not supported in the MVP.
+- SMB credential management is not implemented in the MVP.
+- Network mount automation is not implemented in the MVP.
 - Restore has no point-in-time recovery.
 - Restore has no incremental restore.
 - Restore has no database diff support.
