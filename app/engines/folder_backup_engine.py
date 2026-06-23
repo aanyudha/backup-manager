@@ -11,6 +11,12 @@ from app.models.result import BackupResult
 from app.services.log_service import LogService
 from app.services.path_validation_service import PathValidationService
 from app.services.platform_service import PlatformService
+from app.services.windows_network_share_service import (
+    connect_share_diagnostic,
+    disconnect_share_diagnostic,
+    extract_unc_share_root,
+    should_connect_to_share,
+)
 from app.transports.ftp_transport import FtpTransport
 from app.transports.local_copy_transport import LocalCopyTransport
 from app.transports.robocopy_transport import RobocopyTransport
@@ -137,6 +143,30 @@ class FolderBackupEngine(BaseBackupEngine):
             if not self._looks_like_rsync_remote(profile.source) and not Path(profile.source).expanduser().exists():
                 raise FileNotFoundError(f"Source folder not found: {profile.source}")
 
+    @staticmethod
+    def _describe_destination_validation_context(
+        profile: FolderBackupProfile,
+        *,
+        net_use_attempted: bool,
+        net_use_exit_code: str,
+    ) -> str:
+        """Build a password-safe diagnostic line for UNC validation order."""
+        try:
+            share_root = extract_unc_share_root(profile.destination) if profile.destination.strip().startswith("\\\\") else "(not UNC)"
+        except ValueError as exc:
+            share_root = f"(unavailable: {exc})"
+        credentials_provided = bool(
+            (profile.destination_network_username or "").strip() and (profile.destination_network_password or "")
+        )
+        return (
+            "Destination validation diagnostics: "
+            f"destination={profile.destination} | "
+            f"share_root={share_root} | "
+            f"network_credentials_provided={str(credentials_provided).lower()} | "
+            f"net_use_attempted={str(net_use_attempted).lower()} | "
+            f"net_use_exit_code={net_use_exit_code}"
+        )
+
     def run(
         self,
         profile: FolderBackupProfile,
@@ -144,27 +174,74 @@ class FolderBackupEngine(BaseBackupEngine):
     ) -> BackupResult:
         """Execute a folder backup using the resolved transport."""
         selected_engine = self.resolve_engine(profile)
+        should_disconnect_share = should_connect_to_share(
+            profile.destination,
+            profile.destination_type,
+            profile.destination_network_username,
+            profile.destination_network_password,
+            platform_service=self.platform_service,
+        )
+        disconnect_warning: str | None = None
         self.log_service.log_app(f"Requested engine: {profile.engine}")
         if profile.engine == "auto":
             self.log_service.log_app(f"Resolved engine: {selected_engine}")
-        self._validate_profile(profile, selected_engine)
-
-        if progress:
-            if profile.engine == "auto" and profile.has_sftp_configuration() and profile.has_ftp_configuration():
-                progress(
-                    "Both SFTP and FTP settings are filled. Auto selected SFTP. "
-                    "Clear unused settings to avoid confusion."
+        self.log_service.log_app(
+            self._describe_destination_validation_context(
+                profile,
+                net_use_attempted=should_disconnect_share,
+                net_use_exit_code="not-attempted",
+            )
+        )
+        if should_disconnect_share:
+            connect_diagnostic = connect_share_diagnostic(
+                profile.destination,
+                profile.destination_network_username or "",
+                profile.destination_network_password or "",
+                profile.destination_network_domain,
+            )
+            self.log_service.log_app(connect_diagnostic.message)
+            self.log_service.log_app(
+                self._describe_destination_validation_context(
+                    profile,
+                    net_use_attempted=True,
+                    net_use_exit_code=str(connect_diagnostic.returncode),
                 )
-            progress(f"Using {selected_engine} engine for {profile.name}.")
+            )
+            if not connect_diagnostic.success:
+                raise RuntimeError(connect_diagnostic.message)
 
-        if selected_engine == "local_copy":
-            return LocalCopyTransport(self.log_service).run(profile, progress)
-        if selected_engine == "robocopy":
-            return RobocopyTransport(self.log_service, self.platform_service).run(profile, progress)
-        if selected_engine == "rsync":
-            return RsyncTransport(self.log_service, self.platform_service).run(profile, progress)
-        if selected_engine == "sftp":
-            return SftpTransport(self.log_service).run(profile, progress)
-        if selected_engine == "ftp":
-            return FtpTransport(self.log_service).run(profile, progress)
-        raise RuntimeError(f"Unsupported folder engine: {selected_engine}")
+        try:
+            self._validate_profile(profile, selected_engine)
+
+            if progress:
+                if profile.engine == "auto" and profile.has_sftp_configuration() and profile.has_ftp_configuration():
+                    progress(
+                        "Both SFTP and FTP settings are filled. Auto selected SFTP. "
+                        "Clear unused settings to avoid confusion."
+                    )
+                progress(f"Using {selected_engine} engine for {profile.name}.")
+
+            if selected_engine == "local_copy":
+                result = LocalCopyTransport(self.log_service).run(profile, progress)
+            elif selected_engine == "robocopy":
+                result = RobocopyTransport(self.log_service, self.platform_service).run(profile, progress)
+            elif selected_engine == "rsync":
+                result = RsyncTransport(self.log_service, self.platform_service).run(profile, progress)
+            elif selected_engine == "sftp":
+                result = SftpTransport(self.log_service).run(profile, progress)
+            elif selected_engine == "ftp":
+                result = FtpTransport(self.log_service).run(profile, progress)
+            else:
+                raise RuntimeError(f"Unsupported folder engine: {selected_engine}")
+        finally:
+            if should_disconnect_share and not profile.destination_network_remember_session:
+                disconnect_diagnostic = disconnect_share_diagnostic(profile.destination)
+                self.log_service.log_app(disconnect_diagnostic.message)
+                if not disconnect_diagnostic.success:
+                    disconnect_warning = disconnect_diagnostic.message
+
+        if disconnect_warning:
+            result.message = f"{result.message} Disconnect warning: {disconnect_warning}"
+            if progress:
+                progress(disconnect_warning)
+        return result

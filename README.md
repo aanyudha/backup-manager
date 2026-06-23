@@ -253,6 +253,8 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - Network destinations can use UNC paths such as `\\server\share\backup` or mapped drives such as `Z:\backup`.
 - Mapped drives are user-session dependent and may not exist for scheduled or service runs.
 - Prefer UNC paths for Windows Task Scheduler and service-style backups.
+- If Explorer can browse a share but the app cannot write to it, use the optional `Windows Network Login` fields for that destination profile.
+- Explorer access does not always mean a background Python process or service has the same SMB session.
 - You can optionally set a custom `mysqldump` path in the profile or in settings.
 - Leave the profile `mysqldump Path` blank to auto-detect `mysqldump` from `PATH`.
 
@@ -270,7 +272,9 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - MySQL passwords are masked in logs and UI output.
 - MySQL backups can optionally stream directly to `.sql.gz` without first writing a large `.sql` file.
 - MySQL `Destination Type` can be `Local Folder` or `Network/Mounted Folder`.
-- `Network/Mounted Folder` means an OS-accessible filesystem path. The app does not mount shares or store SMB credentials.
+- `Network/Mounted Folder` means an OS-accessible filesystem path.
+- For Windows UNC destinations, you can optionally fill the `Windows Network Login` section with username, password, domain, and `remember session`.
+- The app only does a Windows `net use` pre-connect for UNC destinations when credentials are supplied.
 - Leave the profile `mysqldump Path` blank to auto-detect `mysqldump` from `PATH`.
 
 ## Compression
@@ -316,8 +320,8 @@ Folder backup outputs are directories. In v0.2.0, SHA256 and retention are appli
 - Rsync source uses the `Source Path` field and can use remote syntax such as `user@host:/path`.
 - Folder `Destination Type` can be `Local Folder` or `Network/Mounted Folder`.
 - `Network/Mounted Folder` means an OS-accessible path such as `\\server\share\backup`, `Z:\backup`, `/mnt/backup`, or `/media/nas/backup`.
-- The app does not mount network shares, store SMB credentials, or automate network logins.
-- For scheduled or service backups, make sure the destination path is already accessible to the user account that runs the backup.
+- For Windows UNC destinations, you can optionally fill the `Windows Network Login` section so the app can pre-connect the share with `net use`.
+- For scheduled or service backups, prefer UNC paths and configured credentials because mapped drives may not exist in that session.
 - `copy_new_changed` copies only new or updated files.
 - `sync_without_delete` keeps destination-only files intact.
 - `mirror_with_delete` deletes destination-only files for supported transports.
@@ -371,6 +375,15 @@ For the MVP, passwords may be stored in `config/profiles.json`. This is convenie
 - Do not commit generated backup artifacts such as `.sql` or `.sql.gz` files.
 - The app does not log FTP, SFTP, MySQL, or SMB passwords in plaintext.
 
+## Windows Network Login
+
+- Use this only for Windows UNC destinations such as `\\192.168.23.6\Backup\1.55\folder`.
+- Invalid slash-style paths such as `//192.168.23.6/Backup/1.55/folder` are rejected; use UNC backslashes.
+- If username and password are left blank, the app does not call `net use`.
+- If credentials are filled, the app connects the UNC share before destination validation and backup execution.
+- If `Remember Session` is off, the app disconnects the share after `Test Destination` and after the backup run.
+- The app does not implement a full SMB transport; it only pre-connects UNC destinations with Windows `net use`.
+
 ## Restore MVP Limitations
 
 - No point-in-time recovery
@@ -378,7 +391,7 @@ For the MVP, passwords may be stored in `config/profiles.json`. This is convenie
 - No database diff
 - No folder versioning
 - FTP/SFTP remote destination upload is not supported yet.
-- SMB credential management is not implemented yet.
+- Full SMB transport is not implemented.
 - Network mount automation is not implemented yet.
 
 ## License

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+from types import SimpleNamespace
 
 if platform.system().lower() == "linux":
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -28,7 +29,7 @@ def test_mysql_profiles_page_exposes_expanding_database_list() -> None:
     assert "auto-detect mysqldump from PATH" in page.mysqldump_help_label.text()
     assert "engine auto" not in page.mysqldump_help_label.text().lower()
     assert page.destination_type_combo.itemText(1) == "Network/Mounted Folder"
-    assert "Credentials/mounting are handled by the OS" in page.destination_helper_label.text()
+    assert "Windows UNC paths" in page.destination_helper_label.text()
 
     page.close()
     app.quit()
@@ -135,6 +136,30 @@ def test_collect_form_data_persists_network_destination_type() -> None:
     app.quit()
 
 
+def test_collect_form_data_persists_windows_network_login_fields() -> None:
+    app = QApplication.instance() or QApplication([])
+    page = MySQLProfilesPage(StubMySQLService())
+    page.name_edit.setText("Primary DB")
+    page.host_edit.setText("127.0.0.1")
+    page.username_edit.setText("root")
+    page.destination_type_combo.setCurrentIndex(1)
+    page.destination_edit.setText(r"\\server\share\backup")
+    page.destination_network_username_edit.setText("backup-user")
+    page.destination_network_password_edit.setText("secret")
+    page.destination_network_domain_edit.setText("WORKGROUP")
+    page.destination_network_remember_session_checkbox.setChecked(True)
+
+    collected = page._collect_form_data()
+
+    assert collected.destination_network_username == "backup-user"
+    assert collected.destination_network_password == "secret"
+    assert collected.destination_network_domain == "WORKGROUP"
+    assert collected.destination_network_remember_session is True
+
+    page.close()
+    app.quit()
+
+
 def test_mysql_test_destination_calls_validation_only(monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     page = MySQLProfilesPage(StubMySQLService())
@@ -169,6 +194,62 @@ def test_mysql_test_destination_calls_validation_only(monkeypatch) -> None:
     assert dialogs and dialogs[0][0] == "info"
     assert dialogs[0][1] == diagnostic
     assert diagnostic in page.status_output.toPlainText()
+
+    page.close()
+    app.quit()
+
+
+def test_mysql_test_destination_connects_then_disconnects_when_credentials_provided(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    page = MySQLProfilesPage(StubMySQLService())
+    page.destination_type_combo.setCurrentIndex(1)
+    page.destination_edit.setText(r"\\server\share\backup")
+    page.destination_network_username_edit.setText("backup-user")
+    page.destination_network_password_edit.setText("secret")
+    page.destination_network_domain_edit.setText("WORKGROUP")
+    order: list[str] = []
+
+    monkeypatch.setattr(page.platform_service, "is_windows", lambda: True)
+    monkeypatch.setattr(
+        "app.ui.mysql_profiles_page.connect_share_diagnostic",
+        lambda *args, **kwargs: (
+            order.append("connect")
+            or SimpleNamespace(
+                success=True,
+                message="connected",
+                share_root=r"\\server\share",
+                returncode=0,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        page.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (order.append("validate") or True, "diagnostic"),
+    )
+    monkeypatch.setattr(
+        "app.ui.mysql_profiles_page.disconnect_share_diagnostic",
+        lambda *args, **kwargs: (
+            order.append("disconnect")
+            or SimpleNamespace(
+                success=True,
+                message="disconnected",
+                share_root=r"\\server\share",
+                returncode=0,
+            )
+        ),
+    )
+    monkeypatch.setattr("app.ui.mysql_profiles_page.get_current_windows_user", lambda: "WORKGROUP\\tester")
+    monkeypatch.setattr("app.ui.mysql_profiles_page.QMessageBox.information", lambda *args: None)
+    monkeypatch.setattr("app.ui.mysql_profiles_page.QMessageBox.warning", lambda *args: None)
+
+    page._test_destination()
+
+    assert order == ["connect", "validate", "disconnect"]
+    status_text = page.status_output.toPlainText()
+    assert "Share Root: \\\\server\\share" in status_text
+    assert "Current Windows User: WORKGROUP\\tester" in status_text
+    assert "Write Probe Result:\ndiagnostic" in status_text
 
     page.close()
     app.quit()

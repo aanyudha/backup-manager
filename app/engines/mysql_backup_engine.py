@@ -17,6 +17,13 @@ from app.models.result import BackupResult
 from app.services.compression_service import CompressionService, CompressionServiceError
 from app.services.log_service import LogService
 from app.services.path_validation_service import PathValidationService
+from app.services.platform_service import PlatformService
+from app.services.windows_network_share_service import (
+    connect_share_diagnostic,
+    disconnect_share_diagnostic,
+    extract_unc_share_root,
+    should_connect_to_share,
+)
 
 FATAL_STDERR_PATTERNS = (
     "access denied",
@@ -55,10 +62,12 @@ class MySQLBackupEngine(BaseBackupEngine):
         log_service: LogService,
         compression_service: CompressionService | None = None,
         path_validation_service: PathValidationService | None = None,
+        platform_service: PlatformService | None = None,
     ) -> None:
         self.log_service = log_service
         self.compression_service = compression_service or CompressionService()
         self.path_validation_service = path_validation_service or PathValidationService()
+        self.platform_service = platform_service or PlatformService()
 
     def resolve_mysqldump(self, profile: MySQLBackupProfile) -> str:
         """Resolve the mysqldump executable path."""
@@ -231,6 +240,30 @@ class MySQLBackupEngine(BaseBackupEngine):
             return f"MySQL backup completed with warning: {warning_summary}"
         return "MySQL backup completed successfully."
 
+    @staticmethod
+    def _describe_destination_validation_context(
+        profile: MySQLBackupProfile,
+        *,
+        net_use_attempted: bool,
+        net_use_exit_code: str,
+    ) -> str:
+        """Build a password-safe diagnostic line for UNC validation order."""
+        try:
+            share_root = extract_unc_share_root(profile.destination) if profile.destination.strip().startswith("\\\\") else "(not UNC)"
+        except ValueError as exc:
+            share_root = f"(unavailable: {exc})"
+        credentials_provided = bool(
+            (profile.destination_network_username or "").strip() and (profile.destination_network_password or "")
+        )
+        return (
+            "Destination validation diagnostics: "
+            f"destination={profile.destination} | "
+            f"share_root={share_root} | "
+            f"network_credentials_provided={str(credentials_provided).lower()} | "
+            f"net_use_attempted={str(net_use_attempted).lower()} | "
+            f"net_use_exit_code={net_use_exit_code}"
+        )
+
     def run(
         self,
         profile: MySQLBackupProfile,
@@ -239,51 +272,110 @@ class MySQLBackupEngine(BaseBackupEngine):
         """Execute a mysqldump process and persist the SQL output."""
         started_at = datetime.now(timezone.utc)
         logger, log_path = self.log_service.create_backup_logger(profile.name, started_at)
-        destination_ok, destination_message = self.path_validation_service.validate_destination_path(
+        should_disconnect_share = should_connect_to_share(
             profile.destination,
             profile.destination_type,
+            profile.destination_network_username,
+            profile.destination_network_password,
+            platform_service=self.platform_service,
         )
-        if not destination_ok:
-            raise RuntimeError(destination_message)
-        destination_dir = Path(profile.destination).expanduser()
-        output_path = self.compression_service.build_mysql_output_path(
-            destination_dir=destination_dir,
-            safe_profile_name=self.log_service.safe_name(profile.name),
-            started_at=started_at,
-            compress=profile.compress,
-        )
+        disconnect_warning: str | None = None
+        completed = subprocess.CompletedProcess(args=[], returncode=1, stderr=b"")
+        success = False
+        message = "MySQL backup failed."
+        output_path: Path | None = None
+        command: MySQLDumpCommand | None = None
 
-        command = self.build_dump_command(profile)
-        logger.info("Starting MySQL backup for profile '%s'.", profile.name)
-        logger.info("Command: %s", self.build_log_command(profile, command))
-        logger.info("MySQL Version: %s", self.get_mysql_version(profile))
-        logger.info("mysqldump Version: %s", self.get_mysqldump_version(command.args[0]))
-        logger.info("Database Mode: %s", profile.database_mode)
-        logger.info("Selected Databases: %s", self.describe_selected_databases(profile))
-        logger.info("Compression Enabled: %s", profile.compress)
-        logger.info("Output Path: %s", output_path)
-        if progress:
-            progress(f"Running mysqldump for {profile.name}...")
+        logger.info(
+            "%s",
+            self._describe_destination_validation_context(
+                profile,
+                net_use_attempted=should_disconnect_share,
+                net_use_exit_code="not-attempted",
+            ),
+        )
+        if should_disconnect_share:
+            connect_diagnostic = connect_share_diagnostic(
+                profile.destination,
+                profile.destination_network_username or "",
+                profile.destination_network_password or "",
+                profile.destination_network_domain,
+            )
+            logger.info("%s", connect_diagnostic.message)
+            logger.info(
+                "%s",
+                self._describe_destination_validation_context(
+                    profile,
+                    net_use_attempted=True,
+                    net_use_exit_code=str(connect_diagnostic.returncode),
+                ),
+            )
+            if not connect_diagnostic.success:
+                raise RuntimeError(connect_diagnostic.message)
 
         try:
-            completed = self.execute_dump(command, output_path, compress=profile.compress)
-            stderr_text = self.decode_stderr(completed)
+            destination_ok, destination_message = self.path_validation_service.validate_destination_path(
+                profile.destination,
+                profile.destination_type,
+            )
+            if not destination_ok:
+                raise RuntimeError(destination_message)
 
-            if completed.returncode != 0 and self.should_retry_without_column_statistics(stderr_text):
-                logger.warning("Retrying mysqldump without --column-statistics=0 for compatibility.")
-                command = self.build_dump_command(profile, include_column_statistics=False)
-                logger.info("Retry Command: %s", self.build_log_command(profile, command))
+            destination_dir = Path(profile.destination).expanduser()
+            output_path = self.compression_service.build_mysql_output_path(
+                destination_dir=destination_dir,
+                safe_profile_name=self.log_service.safe_name(profile.name),
+                started_at=started_at,
+                compress=profile.compress,
+            )
+
+            command = self.build_dump_command(profile)
+            logger.info("Starting MySQL backup for profile '%s'.", profile.name)
+            logger.info("Command: %s", self.build_log_command(profile, command))
+            logger.info("MySQL Version: %s", self.get_mysql_version(profile))
+            logger.info("mysqldump Version: %s", self.get_mysqldump_version(command.args[0]))
+            logger.info("Database Mode: %s", profile.database_mode)
+            logger.info("Selected Databases: %s", self.describe_selected_databases(profile))
+            logger.info("Compression Enabled: %s", profile.compress)
+            logger.info("Output Path: %s", output_path)
+            if progress:
+                progress(f"Running mysqldump for {profile.name}...")
+
+            try:
                 completed = self.execute_dump(command, output_path, compress=profile.compress)
                 stderr_text = self.decode_stderr(completed)
 
-            success = completed.returncode == 0 and not self.contains_fatal_stderr(stderr_text)
-            message = self.build_result_message(success=success, stderr_text=stderr_text)
-        except CompressionServiceError as exc:
-            completed = subprocess.CompletedProcess(args=command.args, returncode=1, stderr=str(exc).encode("utf-8"))
-            stderr_text = str(exc)
-            success = False
-            message = f"MySQL backup failed: Compression error: {exc}"
-            logger.error("Compression failed: %s", exc)
+                if completed.returncode != 0 and self.should_retry_without_column_statistics(stderr_text):
+                    logger.warning("Retrying mysqldump without --column-statistics=0 for compatibility.")
+                    command = self.build_dump_command(profile, include_column_statistics=False)
+                    logger.info("Retry Command: %s", self.build_log_command(profile, command))
+                    completed = self.execute_dump(command, output_path, compress=profile.compress)
+                    stderr_text = self.decode_stderr(completed)
+
+                success = completed.returncode == 0 and not self.contains_fatal_stderr(stderr_text)
+                message = self.build_result_message(success=success, stderr_text=stderr_text)
+            except CompressionServiceError as exc:
+                completed_args = command.args if command is not None else []
+                completed = subprocess.CompletedProcess(
+                    args=completed_args,
+                    returncode=1,
+                    stderr=str(exc).encode("utf-8"),
+                )
+                success = False
+                message = f"MySQL backup failed: Compression error: {exc}"
+                logger.error("Compression failed: %s", exc)
+        finally:
+            if should_disconnect_share and not profile.destination_network_remember_session:
+                disconnect_diagnostic = disconnect_share_diagnostic(profile.destination)
+                logger.info("%s", disconnect_diagnostic.message)
+                if not disconnect_diagnostic.success:
+                    disconnect_warning = disconnect_diagnostic.message
+
+        if disconnect_warning:
+            message = f"{message} Disconnect warning: {disconnect_warning}"
+            logger.warning("%s", disconnect_warning)
+            if progress:
+                progress(disconnect_warning)
 
         finished_at = datetime.now(timezone.utc)
         logger.info("Finished with exit code %s. %s", completed.returncode, message)
@@ -300,5 +392,5 @@ class MySQLBackupEngine(BaseBackupEngine):
             exit_code=completed.returncode,
             message=message,
             log_file=str(log_path),
-            output_file=str(output_path) if output_path.exists() else None,
+            output_file=str(output_path) if output_path and output_path.exists() else None,
         )

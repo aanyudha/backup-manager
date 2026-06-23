@@ -114,6 +114,10 @@ class MySQLBackupProfile(BaseProfile):
     mysqldump_path: str | None = None
     destination: str
     destination_type: DestinationType = "local"
+    destination_network_username: str | None = None
+    destination_network_password: str | None = None
+    destination_network_domain: str | None = None
+    destination_network_remember_session: bool = False
     compress: bool = False
 
     @model_validator(mode="before")
@@ -142,6 +146,20 @@ class MySQLBackupProfile(BaseProfile):
         """Trim database names and remove empty entries."""
         return [entry.strip() for entry in value if entry.strip()]
 
+    @field_validator(
+        "mysqldump_path",
+        "destination_network_username",
+        "destination_network_password",
+        "destination_network_domain",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        """Normalize optional strings."""
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
     @model_validator(mode="after")
     def validate_database_mode(self) -> "MySQLBackupProfile":
         """Ensure database selections match the selected mode."""
@@ -160,6 +178,10 @@ class FolderBackupProfile(BaseProfile):
     destination: str
     source_type: FolderSourceType = "local"
     destination_type: DestinationType = "local"
+    destination_network_username: str | None = None
+    destination_network_password: str | None = None
+    destination_network_domain: str | None = None
+    destination_network_remember_session: bool = False
     engine: Literal["auto", "local_copy", "robocopy", "rsync", "sftp", "ftp"] = "auto"
     mode: Literal["copy_new_changed", "sync_without_delete", "mirror_with_delete"] = (
         "copy_new_changed"
@@ -226,6 +248,9 @@ class FolderBackupProfile(BaseProfile):
         "ftp_username",
         "ftp_password",
         "ftp_remote_path",
+        "destination_network_username",
+        "destination_network_password",
+        "destination_network_domain",
     )
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:

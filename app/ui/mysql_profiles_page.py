@@ -31,6 +31,14 @@ from PySide6.QtWidgets import (
 from app.models.profile import MySQLBackupProfile, utc_now
 from app.services.mysql_service import MySQLService
 from app.services.path_validation_service import PathValidationService
+from app.services.platform_service import PlatformService
+from app.services.windows_network_share_service import (
+    connect_share_diagnostic,
+    disconnect_share_diagnostic,
+    extract_unc_share_root,
+    get_current_windows_user,
+    should_connect_to_share,
+)
 from app.ui.schedule_fields_widget import ScheduleFieldsSection
 
 
@@ -46,6 +54,7 @@ class MySQLProfilesPage(QWidget):
         self.setObjectName("mysqlProfilesPage")
         self.mysql_service = mysql_service
         self.path_validation_service = PathValidationService()
+        self.platform_service = PlatformService()
         self._profiles: dict[str, MySQLBackupProfile] = {}
         self._current_id: str | None = None
 
@@ -72,9 +81,27 @@ class MySQLProfilesPage(QWidget):
         self.destination_edit = QLineEdit()
         self.destination_browse_button = QPushButton("Browse Destination")
         self.destination_helper_label = QLabel(
-            "Network/Mounted Folder supports Windows UNC paths, mapped drives, or Linux mounted shares. Credentials/mounting are handled by the OS."
+            "Network/Mounted Folder supports Windows UNC paths, mapped drives, or Linux mounted shares."
         )
         self.destination_helper_label.setWordWrap(True)
+        self.destination_network_group = QGroupBox("Windows Network Login")
+        destination_network_form = QFormLayout(self.destination_network_group)
+        self.destination_network_username_edit = QLineEdit()
+        self.destination_network_password_edit = QLineEdit()
+        self.destination_network_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.destination_network_domain_edit = QLineEdit()
+        self.destination_network_remember_session_checkbox = QCheckBox("Keep SMB session after backup/test")
+        self.connect_network_share_button = QPushButton("Connect/Test Network Share")
+        self.destination_network_warning_label = QLabel(
+            "Windows-only: use a UNC path like \\\\server\\share\\folder. For Task Scheduler or service mode, prefer UNC paths and credentials because mapped drives may not exist in that session."
+        )
+        self.destination_network_warning_label.setWordWrap(True)
+        destination_network_form.addRow("Username", self.destination_network_username_edit)
+        destination_network_form.addRow("Password", self.destination_network_password_edit)
+        destination_network_form.addRow("Domain", self.destination_network_domain_edit)
+        destination_network_form.addRow("", self.destination_network_remember_session_checkbox)
+        destination_network_form.addRow("", self.destination_network_warning_label)
+        destination_network_form.addRow("", self.connect_network_share_button)
         self.database_mode_combo = QComboBox()
         self.database_mode_combo.addItems(["all", "single", "multiple"])
         self.database_list = QListWidget()
@@ -151,6 +178,7 @@ class MySQLProfilesPage(QWidget):
             self._build_line_with_button(self.destination_edit, self.destination_browse_button),
         )
         output_form.addRow("", self.destination_helper_label)
+        output_form.addRow("", self.destination_network_group)
         output_form.addRow("", self.enabled_checkbox)
         output_form.addRow("", self.compress_checkbox)
         output_form.addRow("", self.retention_checkbox)
@@ -191,6 +219,9 @@ class MySQLProfilesPage(QWidget):
         self.new_button.clicked.connect(self.clear_form)
         self.retention_checkbox.toggled.connect(self.retention_days_spin.setEnabled)
         self.destination_browse_button.clicked.connect(self._browse_destination_folder)
+        self.destination_type_combo.currentIndexChanged.connect(self._refresh_destination_network_ui)
+        self.connect_network_share_button.clicked.connect(self._test_destination)
+        self._refresh_destination_network_ui()
 
     @staticmethod
     def _build_line_with_button(line_edit: QLineEdit, button: QPushButton) -> QWidget:
@@ -216,6 +247,10 @@ class MySQLProfilesPage(QWidget):
         """Return the stored data value for a combo box."""
         value = combo.currentData()
         return value if isinstance(value, str) else combo.currentText()
+
+    def _refresh_destination_network_ui(self, *_args) -> None:
+        """Show Windows share login fields only for network destinations."""
+        self.destination_network_group.setVisible(self._current_combo_value(self.destination_type_combo) == "network")
 
     def set_profiles(self, profiles: list[MySQLBackupProfile]) -> None:
         """Load profiles into the page list."""
@@ -257,6 +292,10 @@ class MySQLProfilesPage(QWidget):
         self.mysqldump_path_edit.clear()
         self._set_combo_value(self.destination_type_combo, "local")
         self.destination_edit.clear()
+        self.destination_network_username_edit.clear()
+        self.destination_network_password_edit.clear()
+        self.destination_network_domain_edit.clear()
+        self.destination_network_remember_session_checkbox.setChecked(False)
         self.database_mode_combo.setCurrentText("all")
         self.database_list.clear()
         self.enabled_checkbox.setChecked(True)
@@ -266,6 +305,7 @@ class MySQLProfilesPage(QWidget):
         self.retention_days_spin.setEnabled(False)
         self.schedule_fields.clear()
         self.profile_list.clearSelection()
+        self._refresh_destination_network_ui()
 
     def _load_selected_profile(self, current: QListWidgetItem | None) -> None:
         if current is None:
@@ -284,6 +324,10 @@ class MySQLProfilesPage(QWidget):
         self.mysqldump_path_edit.setText(profile.mysqldump_path or "")
         self._set_combo_value(self.destination_type_combo, profile.destination_type)
         self.destination_edit.setText(profile.destination)
+        self.destination_network_username_edit.setText(profile.destination_network_username or "")
+        self.destination_network_password_edit.setText(profile.destination_network_password or "")
+        self.destination_network_domain_edit.setText(profile.destination_network_domain or "")
+        self.destination_network_remember_session_checkbox.setChecked(profile.destination_network_remember_session)
         self.database_mode_combo.setCurrentText(profile.database_mode)
         self.enabled_checkbox.setChecked(profile.enabled)
         self.compress_checkbox.setChecked(profile.compress)
@@ -292,6 +336,7 @@ class MySQLProfilesPage(QWidget):
         self.retention_days_spin.setEnabled(profile.retention_enabled)
         self.schedule_fields.load_profile(profile)
         self.restore_saved_database_selection(profile)
+        self._refresh_destination_network_ui()
 
     def populate_database_list(self, databases: list[str], selected_databases: list[str]) -> None:
         """Merge the loaded list with saved selections so edits do not discard choices."""
@@ -363,6 +408,10 @@ class MySQLProfilesPage(QWidget):
             mysqldump_path=self.mysqldump_path_edit.text() or None,
             destination_type=self._current_combo_value(self.destination_type_combo),
             destination=self.destination_edit.text(),
+            destination_network_username=self.destination_network_username_edit.text() or None,
+            destination_network_password=self.destination_network_password_edit.text() or None,
+            destination_network_domain=self.destination_network_domain_edit.text() or None,
+            destination_network_remember_session=self.destination_network_remember_session_checkbox.isChecked(),
             compress=self.compress_checkbox.isChecked(),
             enabled=self.enabled_checkbox.isChecked(),
             retention_enabled=self.retention_checkbox.isChecked(),
@@ -400,11 +449,54 @@ class MySQLProfilesPage(QWidget):
             QMessageBox.warning(self, "MySQL Connection", message)
 
     def _test_destination(self) -> None:
-        valid, message = self.path_validation_service.validate_destination_path(
-            self.destination_edit.text(),
-            self._current_combo_value(self.destination_type_combo),
+        destination = self.destination_edit.text()
+        destination_type = self._current_combo_value(self.destination_type_combo)
+        should_disconnect_share = should_connect_to_share(
+            destination,
+            destination_type,
+            self.destination_network_username_edit.text(),
+            self.destination_network_password_edit.text(),
+            platform_service=self.platform_service,
         )
+        share_root = ""
+        if destination.strip().startswith("\\\\"):
+            try:
+                share_root = extract_unc_share_root(destination)
+            except ValueError:
+                share_root = ""
+        disconnect_warning: str | None = None
+        connect_diagnostic = None
+        if should_disconnect_share:
+            connect_diagnostic = connect_share_diagnostic(
+                destination,
+                self.destination_network_username_edit.text(),
+                self.destination_network_password_edit.text(),
+                self.destination_network_domain_edit.text() or None,
+            )
+            self.append_status(connect_diagnostic.message)
+            if not connect_diagnostic.success:
+                QMessageBox.warning(self, "Test Destination", connect_diagnostic.message)
+                return
+        try:
+            valid, message = self.path_validation_service.validate_destination_path(destination, destination_type)
+        finally:
+            if should_disconnect_share and not self.destination_network_remember_session_checkbox.isChecked():
+                disconnect_diagnostic = disconnect_share_diagnostic(destination)
+                self.append_status(disconnect_diagnostic.message)
+                if not disconnect_diagnostic.success:
+                    disconnect_warning = disconnect_diagnostic.message
+        if connect_diagnostic and connect_diagnostic.success:
+            windows_user = get_current_windows_user()
+            share_root_text = connect_diagnostic.share_root or share_root or "(unavailable)"
+            message = (
+                f"Share Root: {share_root_text}\n"
+                f"Current Windows User: {windows_user}\n"
+                f"Net Use Result:\n{connect_diagnostic.message}\n\n"
+                f"Write Probe Result:\n{message}"
+            )
         self.append_status(message)
+        if disconnect_warning:
+            message = f"{message}\n{disconnect_warning}"
         if valid:
             QMessageBox.information(self, "Test Destination", message)
             return

@@ -48,22 +48,29 @@ python app.py
    - Windows mapped drive: `Z:\backup`
    - Linux mounted share: `/mnt/backup`
    - Linux mounted share: `/media/nas/backup`
-6. Make sure the destination path is already accessible to the OS user that will run the backup.
-7. The app does not mount shares or store SMB credentials for you.
-8. Optionally set a custom `mysqldump` path if it is not available on `PATH`, or leave it blank to auto-detect `mysqldump` from `PATH`.
-9. Choose `all`, `single`, or `multiple` for database mode.
-10. Optionally enable `Compress SQL backup as .sql.gz` for streamed gzip output.
-11. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
-12. Optionally enable `Enable Schedule`.
-13. Choose `Schedule Runner`:
+6. For Windows UNC destinations, you can optionally open `Windows Network Login` and enter:
+   - Username
+   - Password
+   - Domain
+   - `Remember Session` if you want the SMB session kept after the run
+7. Use a UNC path such as `\\192.168.23.6\Backup\1.55\folder` when you need Windows network login support.
+8. Do not use slash-style paths such as `//192.168.23.6/Backup/1.55/folder`.
+9. Explorer access does not always mean a background Python process or service has the same SMB session.
+10. Optionally set a custom `mysqldump` path if it is not available on `PATH`, or leave it blank to auto-detect `mysqldump` from `PATH`.
+11. Choose `all`, `single`, or `multiple` for database mode.
+12. Optionally enable `Compress SQL backup as .sql.gz` for streamed gzip output.
+13. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
+14. Optionally enable `Enable Schedule`.
+15. Choose `Schedule Runner`:
    - `Internal App Scheduler` if the app should run the backup while it is open.
    - `External OS Scheduler` if Windows Task Scheduler or Linux cron should run the backup.
    - `Background Service Scheduler` if `--scheduler-service` should run the backup without opening the GUI.
-14. Choose `manual`, `daily`, `weekly`, or `monthly`, and fill the matching schedule fields.
-15. Optionally leave `Run if missed` enabled so a missed daily, weekly, or monthly run still starts later that same day while the app is open.
-16. Use `Test Connection` to validate the credentials.
-17. Use `Load Database List` to fetch selectable databases.
-18. Click `Save Profile`.
+16. Choose `manual`, `daily`, `weekly`, or `monthly`, and fill the matching schedule fields.
+17. Optionally leave `Run if missed` enabled so a missed daily, weekly, or monthly run still starts later that same day while the app is open.
+18. Use `Test Connection` to validate the credentials.
+19. Use `Connect/Test Network Share` or `Test Destination` if you configured a UNC destination.
+20. Use `Load Database List` to fetch selectable databases.
+21. Click `Save Profile`.
 
 ## How To Create a Folder Profile
 
@@ -97,21 +104,28 @@ python app.py
    - Windows mapped drive: `Z:\backup`
    - Linux mounted share: `/mnt/backup`
    - Linux mounted share: `/media/nas/backup`
-11. Make sure the destination path is already accessible before running the backup.
-12. For scheduled or service backups, prefer UNC paths because mapped drives may not exist in that session.
-13. Choose `auto` unless you need a specific engine.
-14. Choose a mode:
+11. For Windows UNC destinations, you can optionally open `Windows Network Login` and enter:
+   - Username
+   - Password
+   - Domain
+   - `Remember Session` if you want the SMB session kept after the run
+12. Use a UNC path such as `\\192.168.23.6\Backup\1.55\folder` when you need Windows network login support.
+13. Do not use slash-style paths such as `//192.168.23.6/Backup/1.55/folder`.
+14. Explorer access does not always mean a background Python process or service has the same SMB session.
+15. For scheduled or service backups, prefer UNC paths and configured credentials because mapped drives may not exist in that session.
+16. Choose `auto` unless you need a specific engine.
+17. Choose a mode:
    - `copy_new_changed`
    - `sync_without_delete`
    - `mirror_with_delete`
-15. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
-16. Optionally enable `Enable Schedule`.
-17. Choose `Schedule Runner`:
+18. Optionally enable `Retention` and set `Retention Days` to a value greater than `0`.
+19. Optionally enable `Enable Schedule`.
+20. Choose `Schedule Runner`:
    - `Internal App Scheduler` if the app should run the backup while it is open.
    - `External OS Scheduler` if Windows Task Scheduler or Linux cron should run the backup.
    - `Background Service Scheduler` if `--scheduler-service` should run the backup without opening the GUI.
-18. Choose the schedule type, and fill the matching time, weekday, or day-of-month fields.
-19. For FTP in this MVP:
+21. Choose the schedule type, and fill the matching time, weekday, or day-of-month fields.
+22. For FTP in this MVP:
    - FTP is plain FTP.
    - Use SFTP for encrypted transfer.
    - Remote FTP destination upload is not supported.
@@ -120,14 +134,14 @@ python app.py
    - Use `Browse FTP Folder` to pick the remote source folder.
    - Use `copy_new_changed` or `sync_without_delete`.
    - Do not use `mirror_with_delete`.
-20. For SFTP in this MVP:
+23. For SFTP in this MVP:
    - Remote SFTP destination upload is not supported.
    - Remote SFTP sources copy to local or network-mounted destination folders only.
    - Set `SFTP Source Folder` to the remote source folder.
    - Use `Browse SFTP Folder` to pick the remote source folder.
-21. The app does not mount network shares or store SMB credentials for folder destinations.
-22. Prefer SFTP over FTP when the server supports it.
-23. Click `Validate`, then `Save Profile`.
+24. Prefer SFTP over FTP when the server supports it.
+25. Use `Connect/Test Network Share` or `Test Destination` if you configured a UNC destination.
+26. Click `Validate`, then `Save Profile`.
 
 ## How To Run a Backup
 
@@ -259,7 +273,7 @@ python -m PyInstaller --noconfirm --windowed --name HeisenbergBackupManager app.
 - FTP `mirror_with_delete` is not supported in the MVP.
 - SFTP `mirror_with_delete` is not supported in the MVP.
 - FTP/SFTP remote destination upload is not supported in the MVP.
-- SMB credential management is not implemented in the MVP.
+- Full SMB transport is not implemented in the MVP.
 - Network mount automation is not implemented in the MVP.
 - Restore has no point-in-time recovery.
 - Restore has no incremental restore.

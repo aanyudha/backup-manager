@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+from types import SimpleNamespace
 
 if platform.system().lower() == "linux":
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -119,11 +120,12 @@ def test_selecting_sftp_folder_sets_source_type_and_warns_when_engine_is_incompa
 
 
 def test_destination_helper_mentions_os_managed_credentials() -> None:
-    """Destination guidance should explain UNC and OS-managed access."""
+    """Destination guidance should explain UNC usage and scheduler guidance."""
     app = QApplication.instance() or QApplication([])
     page = FolderProfilesPage(PlatformService(), RemoteBrowserService())
 
-    assert "Mount or login must be handled by the OS" in page.destination_helper_label.text()
+    assert "Windows UNC paths" in page.destination_helper_label.text()
+    assert "Task Scheduler or service mode" in page.destination_network_warning_label.text()
     assert "destination upload is not supported yet" in page.destination_limitation_label.text()
 
     page.close()
@@ -164,6 +166,75 @@ def test_folder_test_destination_calls_validation_only(monkeypatch) -> None:
     assert dialogs and dialogs[0][0] == "info"
     assert dialogs[0][1] == diagnostic
     assert diagnostic in page.status_output.toPlainText()
+
+    page.close()
+    app.quit()
+
+
+def test_network_destination_section_visibility_tracks_destination_type() -> None:
+    app = QApplication.instance() or QApplication([])
+    page = FolderProfilesPage(PlatformService(), RemoteBrowserService())
+
+    assert page.destination_network_group.isHidden()
+
+    page.destination_type_combo.setCurrentIndex(1)
+    assert not page.destination_network_group.isHidden()
+    assert page.connect_network_share_button.text() == "Connect/Test Network Share"
+
+    page.close()
+    app.quit()
+
+
+def test_folder_connect_test_share_runs_write_probe_after_connect(monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    page = FolderProfilesPage(PlatformService(), RemoteBrowserService())
+    page.destination_type_combo.setCurrentIndex(1)
+    page.destination_edit.setText(r"\\server\share\backup")
+    page.destination_network_username_edit.setText("backup-user")
+    page.destination_network_password_edit.setText("secret")
+    order: list[str] = []
+
+    monkeypatch.setattr(page.platform_service, "is_windows", lambda: True)
+    monkeypatch.setattr(
+        "app.ui.folder_profiles_page.connect_share_diagnostic",
+        lambda *args, **kwargs: (
+            order.append("connect")
+            or SimpleNamespace(
+                success=True,
+                message="connected",
+                share_root=r"\\server\share",
+                returncode=0,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        page.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (order.append("validate") or True, "probe ok"),
+    )
+    monkeypatch.setattr(
+        "app.ui.folder_profiles_page.disconnect_share_diagnostic",
+        lambda *args, **kwargs: (
+            order.append("disconnect")
+            or SimpleNamespace(
+                success=True,
+                message="disconnected",
+                share_root=r"\\server\share",
+                returncode=0,
+            )
+        ),
+    )
+    monkeypatch.setattr("app.ui.folder_profiles_page.get_current_windows_user", lambda: "WORKGROUP\\tester")
+    monkeypatch.setattr("app.ui.folder_profiles_page.QMessageBox.information", lambda *args: None)
+    monkeypatch.setattr("app.ui.folder_profiles_page.QMessageBox.warning", lambda *args: None)
+
+    page._test_destination()
+
+    assert order == ["connect", "validate", "disconnect"]
+    status_text = page.status_output.toPlainText()
+    assert "Share Root: \\\\server\\share" in status_text
+    assert "Current Windows User: WORKGROUP\\tester" in status_text
+    assert "Write Probe Result:\nprobe ok" in status_text
 
     page.close()
     app.quit()

@@ -33,6 +33,13 @@ from app.models.profile import FolderBackupProfile, utc_now
 from app.services.path_validation_service import PathValidationService
 from app.services.platform_service import PlatformService
 from app.services.remote_browser_service import RemoteBrowserService
+from app.services.windows_network_share_service import (
+    connect_share_diagnostic,
+    disconnect_share_diagnostic,
+    extract_unc_share_root,
+    get_current_windows_user,
+    should_connect_to_share,
+)
 from app.ui.remote_folder_browser_dialog import RemoteFolderBrowserDialog
 from app.ui.schedule_fields_widget import ScheduleFieldsSection
 
@@ -119,13 +126,31 @@ class FolderProfilesPage(QWidget):
         self.ftp_passive_checkbox.setChecked(True)
 
         self.destination_helper_label = QLabel(
-            "Network/Mounted Folder does not store credentials. Mount or login must be handled by the OS."
+            "Network/Mounted Folder supports local mounts, mapped drives, and Windows UNC paths."
         )
         self.destination_helper_label.setWordWrap(True)
         self.destination_limitation_label = QLabel(
             "FTP/SFTP destination upload is not supported yet. Remote sources are copied to Local or Network/Mounted destinations."
         )
         self.destination_limitation_label.setWordWrap(True)
+        self.destination_network_group = QGroupBox("Windows Network Login")
+        destination_network_form = QFormLayout(self.destination_network_group)
+        self.destination_network_username_edit = QLineEdit()
+        self.destination_network_password_edit = QLineEdit()
+        self.destination_network_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.destination_network_domain_edit = QLineEdit()
+        self.destination_network_remember_session_checkbox = QCheckBox("Keep SMB session after backup/test")
+        self.connect_network_share_button = QPushButton("Connect/Test Network Share")
+        self.destination_network_warning_label = QLabel(
+            "Windows-only: use a UNC path like \\\\server\\share\\folder. For Task Scheduler or service mode, prefer UNC paths and credentials because mapped drives may not exist in that session."
+        )
+        self.destination_network_warning_label.setWordWrap(True)
+        destination_network_form.addRow("Username", self.destination_network_username_edit)
+        destination_network_form.addRow("Password", self.destination_network_password_edit)
+        destination_network_form.addRow("Domain", self.destination_network_domain_edit)
+        destination_network_form.addRow("", self.destination_network_remember_session_checkbox)
+        destination_network_form.addRow("", self.destination_network_warning_label)
+        destination_network_form.addRow("", self.connect_network_share_button)
         self.rsync_args_edit = QLineEdit()
         self.enabled_checkbox = QCheckBox("Enabled")
         self.enabled_checkbox.setChecked(True)
@@ -188,6 +213,7 @@ class FolderProfilesPage(QWidget):
             self._build_line_with_button(self.destination_edit, self.destination_browse_button),
         )
         destination_form.addRow("", self.destination_helper_label)
+        destination_form.addRow("", self.destination_network_group)
         destination_form.addRow("", self.destination_limitation_label)
 
         options_group = QGroupBox("Options")
@@ -248,11 +274,13 @@ class FolderProfilesPage(QWidget):
         self.source_type_combo.currentIndexChanged.connect(self._refresh_resolved_engine)
         self.destination_type_combo.currentIndexChanged.connect(self._refresh_warning)
         self.destination_type_combo.currentIndexChanged.connect(self._refresh_resolved_engine)
+        self.destination_type_combo.currentIndexChanged.connect(self._refresh_destination_network_ui)
         self.retention_checkbox.toggled.connect(self.retention_days_spin.setEnabled)
         self.source_browse_button.clicked.connect(self._browse_source_folder)
         self.destination_browse_button.clicked.connect(self._browse_destination_folder)
         self.ftp_browse_button.clicked.connect(self._browse_ftp_folder)
         self.sftp_browse_button.clicked.connect(self._browse_sftp_folder)
+        self.connect_network_share_button.clicked.connect(self._test_destination)
         for widget in (
             self.source_edit,
             self.destination_edit,
@@ -264,6 +292,7 @@ class FolderProfilesPage(QWidget):
             widget.textChanged.connect(self._refresh_resolved_engine)
             widget.textChanged.connect(self._refresh_warning)
         self._refresh_source_ui()
+        self._refresh_destination_network_ui()
         self._refresh_warning()
         self._refresh_resolved_engine()
 
@@ -301,6 +330,10 @@ class FolderProfilesPage(QWidget):
 
     def _current_destination_type(self) -> str:
         return self._current_combo_value(self.destination_type_combo)
+
+    def _refresh_destination_network_ui(self, *_args) -> None:
+        """Show Windows share login fields only for network destinations."""
+        self.destination_network_group.setVisible(self._current_destination_type() == "network")
 
     def set_profiles(self, profiles: list[FolderBackupProfile]) -> None:
         """Load folder profiles into the list."""
@@ -351,6 +384,10 @@ class FolderProfilesPage(QWidget):
         self.ftp_password_edit.clear()
         self.ftp_remote_path_edit.clear()
         self.ftp_passive_checkbox.setChecked(True)
+        self.destination_network_username_edit.clear()
+        self.destination_network_password_edit.clear()
+        self.destination_network_domain_edit.clear()
+        self.destination_network_remember_session_checkbox.setChecked(False)
         self.rsync_args_edit.clear()
         self.enabled_checkbox.setChecked(True)
         self.retention_checkbox.setChecked(False)
@@ -359,6 +396,7 @@ class FolderProfilesPage(QWidget):
         self.schedule_fields.clear()
         self.profile_list.clearSelection()
         self._refresh_source_ui()
+        self._refresh_destination_network_ui()
         self._refresh_warning()
         self._refresh_resolved_engine()
 
@@ -391,6 +429,10 @@ class FolderProfilesPage(QWidget):
         self.ftp_password_edit.setText(profile.ftp_password or "")
         self.ftp_remote_path_edit.setText(profile.ftp_remote_path or "")
         self.ftp_passive_checkbox.setChecked(profile.ftp_passive)
+        self.destination_network_username_edit.setText(profile.destination_network_username or "")
+        self.destination_network_password_edit.setText(profile.destination_network_password or "")
+        self.destination_network_domain_edit.setText(profile.destination_network_domain or "")
+        self.destination_network_remember_session_checkbox.setChecked(profile.destination_network_remember_session)
         self.rsync_args_edit.setText(" ".join(profile.rsync_extra_args))
         self.enabled_checkbox.setChecked(profile.enabled)
         self.retention_checkbox.setChecked(profile.retention_enabled)
@@ -398,6 +440,7 @@ class FolderProfilesPage(QWidget):
         self.retention_days_spin.setEnabled(profile.retention_enabled)
         self.schedule_fields.load_profile(profile)
         self._refresh_source_ui()
+        self._refresh_destination_network_ui()
         self._refresh_warning()
         self._refresh_resolved_engine()
 
@@ -428,6 +471,10 @@ class FolderProfilesPage(QWidget):
             ftp_password=self.ftp_password_edit.text() or None,
             ftp_remote_path=self.ftp_remote_path_edit.text() or None,
             ftp_passive=self.ftp_passive_checkbox.isChecked(),
+            destination_network_username=self.destination_network_username_edit.text() or None,
+            destination_network_password=self.destination_network_password_edit.text() or None,
+            destination_network_domain=self.destination_network_domain_edit.text() or None,
+            destination_network_remember_session=self.destination_network_remember_session_checkbox.isChecked(),
             rsync_extra_args=shlex.split(self.rsync_args_edit.text()) if self.rsync_args_edit.text().strip() else [],
             enabled=self.enabled_checkbox.isChecked(),
             retention_enabled=self.retention_checkbox.isChecked(),
@@ -544,11 +591,54 @@ class FolderProfilesPage(QWidget):
         QMessageBox.information(self, "Validate Profile", message)
 
     def _test_destination(self) -> None:
-        valid, message = self.path_validation_service.validate_destination_path(
-            self.destination_edit.text(),
-            self._current_destination_type(),
+        destination = self.destination_edit.text()
+        destination_type = self._current_destination_type()
+        should_disconnect_share = should_connect_to_share(
+            destination,
+            destination_type,
+            self.destination_network_username_edit.text(),
+            self.destination_network_password_edit.text(),
+            platform_service=self.platform_service,
         )
+        share_root = ""
+        if destination.strip().startswith("\\\\"):
+            try:
+                share_root = extract_unc_share_root(destination)
+            except ValueError:
+                share_root = ""
+        disconnect_warning: str | None = None
+        connect_diagnostic = None
+        if should_disconnect_share:
+            connect_diagnostic = connect_share_diagnostic(
+                destination,
+                self.destination_network_username_edit.text(),
+                self.destination_network_password_edit.text(),
+                self.destination_network_domain_edit.text() or None,
+            )
+            self.append_status(connect_diagnostic.message)
+            if not connect_diagnostic.success:
+                QMessageBox.warning(self, "Test Destination", connect_diagnostic.message)
+                return
+        try:
+            valid, message = self.path_validation_service.validate_destination_path(destination, destination_type)
+        finally:
+            if should_disconnect_share and not self.destination_network_remember_session_checkbox.isChecked():
+                disconnect_diagnostic = disconnect_share_diagnostic(destination)
+                self.append_status(disconnect_diagnostic.message)
+                if not disconnect_diagnostic.success:
+                    disconnect_warning = disconnect_diagnostic.message
+        if connect_diagnostic and connect_diagnostic.success:
+            windows_user = get_current_windows_user()
+            share_root_text = connect_diagnostic.share_root or share_root or "(unavailable)"
+            message = (
+                f"Share Root: {share_root_text}\n"
+                f"Current Windows User: {windows_user}\n"
+                f"Net Use Result:\n{connect_diagnostic.message}\n\n"
+                f"Write Probe Result:\n{message}"
+            )
         self.append_status(message)
+        if disconnect_warning:
+            message = f"{message}\n{disconnect_warning}"
         if valid:
             QMessageBox.information(self, "Test Destination", message)
             return

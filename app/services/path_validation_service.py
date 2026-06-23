@@ -155,6 +155,18 @@ class PathValidationService:
                     exception=ValueError(f"Unsupported destination type: {destination_type}"),
                 ),
             )
+        if destination_type == "network" and cleaned.startswith("//"):
+            return (
+                False,
+                cls._build_input_failure_message(
+                    path=cleaned,
+                    destination_type=destination_type,
+                    exception=ValueError(
+                        "Invalid Windows network path '//server/share'. "
+                        r"Use a UNC path like '\\server\share\folder'."
+                    ),
+                ),
+            )
         return cls.ensure_destination_writable(cleaned, destination_type=destination_type)
 
     @classmethod

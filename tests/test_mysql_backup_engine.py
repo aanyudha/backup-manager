@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import io
+import logging
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -312,3 +314,81 @@ def test_mysql_backup_fails_early_if_destination_is_unwritable(
 
     with pytest.raises(RuntimeError, match="Destination validation failed:"):
         engine.run(profile)
+
+
+def test_mysql_backup_does_not_call_net_use_on_linux(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = MySQLBackupEngine(LogService(tmp_path))
+    profile = build_mysql_profile(tmp_path)
+    profile.destination = r"\\server\share\backup"
+    profile.destination_type = "network"
+    profile.destination_network_username = "backup-user"
+    profile.destination_network_password = "secret"
+    monkeypatch.setattr(engine.platform_service, "is_windows", lambda: False)
+    monkeypatch.setattr(
+        "app.engines.mysql_backup_engine.connect_share_diagnostic",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("net use should not run on Linux")),
+    )
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (False, "Destination validation failed: blocked"),
+    )
+
+    with pytest.raises(RuntimeError, match="Destination validation failed: blocked"):
+        engine.run(profile)
+
+
+def test_mysql_backup_logs_destination_validation_diagnostics_before_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = MySQLBackupEngine(LogService(tmp_path))
+    profile = build_mysql_profile(tmp_path)
+    profile.destination = r"\\server\share\backup"
+    profile.destination_type = "network"
+    profile.destination_network_username = "backup-user"
+    profile.destination_network_password = "secret"
+    profile.destination_network_domain = "WORKGROUP"
+    stub_versions(monkeypatch, engine)
+
+    monkeypatch.setattr(engine.platform_service, "is_windows", lambda: True)
+    monkeypatch.setattr(
+        "app.engines.mysql_backup_engine.connect_share_diagnostic",
+        lambda *args, **kwargs: SimpleNamespace(
+            success=True,
+            message="connected",
+            share_root=r"\\server\share",
+            returncode=0,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.engines.mysql_backup_engine.disconnect_share_diagnostic",
+        lambda *args, **kwargs: SimpleNamespace(
+            success=True,
+            message="disconnected",
+            share_root=r"\\server\share",
+            returncode=0,
+        ),
+    )
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (False, "Destination validation failed: blocked"),
+    )
+
+    with pytest.raises(RuntimeError, match="Destination validation failed: blocked"):
+        engine.run(profile)
+
+    logging.shutdown()
+    log_files = list(tmp_path.glob("*.log"))
+    assert log_files
+    log_text = "\n".join(log_file.read_text(encoding="utf-8") for log_file in log_files)
+    assert r"destination=\\server\share\backup" in log_text
+    assert r"share_root=\\server\share" in log_text
+    assert "network_credentials_provided=true" in log_text
+    assert "net_use_attempted=true" in log_text
+    assert "net_use_exit_code=0" in log_text
+    assert "secret" not in log_text

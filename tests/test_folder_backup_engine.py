@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 
 import pytest
 
@@ -300,3 +301,137 @@ def test_auto_logs_requested_and_resolved_engine(tmp_path: Path, monkeypatch: py
 
     assert "Requested engine: auto" in app_log_messages
     assert any(message.startswith("Resolved engine: ") for message in app_log_messages)
+
+
+def test_folder_backup_logs_destination_validation_diagnostics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, platform_service = build_engine(tmp_path)
+    source_dir = tmp_path / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    profile = build_profile(
+        tmp_path,
+        source=str(source_dir),
+        destination=r"\\server\share\backup",
+        destination_type="network",
+        destination_network_username="backup-user",
+        destination_network_password="secret",
+        destination_network_domain="WORKGROUP",
+    )
+    app_log_messages: list[str] = []
+
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    monkeypatch.setattr(platform_service, "command_exists", lambda command: False)
+    monkeypatch.setattr(engine.log_service, "log_app", lambda message: app_log_messages.append(message))
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.connect_share_diagnostic",
+        lambda *args, **kwargs: SimpleNamespace(
+            success=True,
+            message="connected",
+            share_root=r"\\server\share",
+            returncode=0,
+        ),
+    )
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (False, "Destination validation failed: blocked"),
+    )
+
+    with pytest.raises(RuntimeError, match="Destination validation failed: blocked"):
+        engine.run(profile)
+
+    assert any(r"destination=\\server\share\backup" in message for message in app_log_messages)
+    assert any(r"share_root=\\server\share" in message for message in app_log_messages)
+    assert any("network_credentials_provided=true" in message for message in app_log_messages)
+    assert any("net_use_attempted=true" in message for message in app_log_messages)
+    assert any("net_use_exit_code=0" in message for message in app_log_messages)
+    assert not any("secret" in message for message in app_log_messages)
+
+
+def test_unc_destination_connects_before_validation_and_disconnects_after_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, platform_service = build_engine(tmp_path)
+    source_dir = tmp_path / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    profile = build_profile(
+        tmp_path,
+        source=str(source_dir),
+        destination=r"\\server\share\backup",
+        destination_type="network",
+        destination_network_username="backup-user",
+        destination_network_password="secret",
+        destination_network_domain="WORKGROUP",
+        destination_network_remember_session=False,
+    )
+    call_order: list[str] = []
+
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    monkeypatch.setattr(platform_service, "command_exists", lambda command: False)
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.connect_share_diagnostic",
+        lambda *args, **kwargs: (
+            call_order.append("connect")
+            or SimpleNamespace(
+                success=True,
+                message="connected",
+                share_root=r"\\server\share",
+                returncode=0,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (call_order.append("validate") or True, "ok"),
+    )
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.disconnect_share_diagnostic",
+        lambda *args, **kwargs: (
+            call_order.append("disconnect")
+            or SimpleNamespace(
+                success=True,
+                message="disconnected",
+                share_root=r"\\server\share",
+                returncode=0,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.LocalCopyTransport.run",
+        lambda self, current_profile, progress=None: (call_order.append("transport") or build_result(current_profile, "Copied 1 file(s)")),
+    )
+
+    result = engine.run(profile)
+
+    assert result.success is True
+    assert call_order == ["connect", "validate", "transport", "disconnect"]
+
+
+def test_local_destination_does_not_call_net_use(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    engine, platform_service = build_engine(tmp_path)
+    source_dir = tmp_path / "source"
+    destination_dir = tmp_path / "destination"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    profile = build_profile(
+        tmp_path,
+        source=str(source_dir),
+        destination=str(destination_dir),
+        destination_network_username="backup-user",
+        destination_network_password="secret",
+    )
+
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.connect_share_diagnostic",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("net use should not run for local paths")),
+    )
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.LocalCopyTransport.run",
+        lambda self, current_profile, progress=None: build_result(current_profile, "Copied 0 file(s)"),
+    )
+
+    result = engine.run(profile)
+
+    assert result.success is True

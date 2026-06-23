@@ -118,3 +118,11 @@ def test_destination_validation_returns_clear_error_if_not_writable(tmp_path: Pa
     assert "Open/Write Result: skipped" in message
     assert "Delete Result: skipped" in message
     assert "Exception: NotADirectoryError:" in message
+
+
+def test_network_destination_rejects_forward_slash_unc_path() -> None:
+    valid, message = PathValidationService.validate_destination_path("//server/share/folder", "network")
+
+    assert valid is False
+    assert "Invalid Windows network path '//server/share'" in message
+    assert r"Use a UNC path like '\\server\share\folder'." in message
