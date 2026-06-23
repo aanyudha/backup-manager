@@ -142,11 +142,12 @@ def test_mysql_test_destination_calls_validation_only(monkeypatch) -> None:
     page.destination_edit.setText(r"\\server\share\backup")
     calls: list[tuple[str, str]] = []
     dialogs: list[tuple[str, str]] = []
+    diagnostic = "Destination validation passed:\nPath: \\\\server\\share\\backup"
 
     monkeypatch.setattr(
         page.path_validation_service,
         "validate_destination_path",
-        lambda path, destination_type: (calls.append((path, destination_type)) or True, ""),
+        lambda path, destination_type: (calls.append((path, destination_type)) or True, diagnostic),
     )
     monkeypatch.setattr(
         page.mysql_service,
@@ -166,7 +167,8 @@ def test_mysql_test_destination_calls_validation_only(monkeypatch) -> None:
 
     assert calls == [(r"\\server\share\backup", "network")]
     assert dialogs and dialogs[0][0] == "info"
-    assert "Destination validation passed" in dialogs[0][1]
+    assert dialogs[0][1] == diagnostic
+    assert diagnostic in page.status_output.toPlainText()
 
     page.close()
     app.quit()

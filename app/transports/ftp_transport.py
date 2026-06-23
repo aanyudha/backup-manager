@@ -14,6 +14,14 @@ from app.transports.base import BaseTransport, ProgressCallback
 class FtpTransport(BaseTransport):
     """Download a remote directory tree over FTP."""
 
+    @staticmethod
+    def _close_logger_handlers(logger) -> None:
+        """Flush and close per-run handlers so diagnostics are readable immediately."""
+        for handler in list(logger.handlers):
+            handler.flush()
+            handler.close()
+            logger.removeHandler(handler)
+
     def _validate_profile(self, profile: FolderBackupProfile) -> None:
         """Validate required FTP fields before connecting."""
         if not profile.ftp_host:
@@ -152,13 +160,41 @@ class FtpTransport(BaseTransport):
         remote_path: PurePosixPath,
         local_path: Path,
         remote_timestamp: int | None,
+        logger,
     ) -> None:
         """Download one file and preserve the remote timestamp when available."""
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        with local_path.open("wb") as handle:
-            ftp.retrbinary(f"RETR {remote_path}", handle.write)
-        if remote_timestamp is not None:
-            os.utime(local_path, (remote_timestamp, remote_timestamp))
+        try:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            with local_path.open("wb") as handle:
+                ftp.retrbinary(f"RETR {remote_path}", handle.write)
+            if remote_timestamp is not None:
+                os.utime(local_path, (remote_timestamp, remote_timestamp))
+        except Exception as exc:
+            message = (
+                "Failed to write downloaded file.\n"
+                f"Local file: {local_path}\n"
+                f"Exception: {exc.__class__.__name__}: {exc}"
+            )
+            logger.exception(message)
+            raise RuntimeError(message) from exc
+
+    @staticmethod
+    def _log_download_target(
+        logger,
+        *,
+        destination_root: Path,
+        remote_root: PurePosixPath,
+        remote_path: PurePosixPath,
+        relative_path: PurePosixPath,
+        local_path: Path,
+    ) -> None:
+        """Log the exact local write target before downloading one remote file."""
+        logger.info("Destination root repr: %r", str(destination_root))
+        logger.info("Remote root: %s", remote_root)
+        logger.info("Remote file: %s", remote_path)
+        logger.info("Relative path: %s", relative_path)
+        logger.info("Final local file repr: %r", str(local_path))
+        logger.info("Parent folder repr: %r", str(local_path.parent))
 
     def _download_tree(
         self,
@@ -166,6 +202,9 @@ class FtpTransport(BaseTransport):
         remote_root: PurePosixPath,
         local_root: Path,
         logger,
+        *,
+        destination_root: Path,
+        source_root: PurePosixPath,
     ) -> int:
         """Recursively download new or updated files from the remote tree."""
         copied = 0
@@ -173,13 +212,29 @@ class FtpTransport(BaseTransport):
             local_path = local_root / remote_path.relative_to(remote_root)
             if facts.get("type") == "dir":
                 local_path.mkdir(parents=True, exist_ok=True)
-                copied += self._download_tree(ftp, remote_path, local_path, logger)
+                copied += self._download_tree(
+                    ftp,
+                    remote_path,
+                    local_path,
+                    logger,
+                    destination_root=destination_root,
+                    source_root=source_root,
+                )
                 continue
 
             remote_size = self._remote_size(ftp, remote_path, facts)
             remote_timestamp = self._remote_timestamp(ftp, remote_path, facts)
             if self._should_copy(local_path, remote_size, remote_timestamp):
-                self._download_file(ftp, remote_path, local_path, remote_timestamp)
+                relative_path = remote_path.relative_to(source_root)
+                self._log_download_target(
+                    logger,
+                    destination_root=destination_root,
+                    remote_root=source_root,
+                    remote_path=remote_path,
+                    relative_path=relative_path,
+                    local_path=local_path,
+                )
+                self._download_file(ftp, remote_path, local_path, remote_timestamp, logger)
                 copied += 1
                 logger.info("Downloaded %s", remote_path)
         return copied
@@ -192,43 +247,53 @@ class FtpTransport(BaseTransport):
         """Download files from an FTP source."""
         started_at = datetime.now(timezone.utc)
         logger, log_path = self.log_service.create_backup_logger(profile.name, started_at)
-        self._validate_profile(profile)
+        try:
+            self._validate_profile(profile)
 
-        if profile.mode == "mirror_with_delete":
+            if profile.mode == "mirror_with_delete":
+                return self.build_result(
+                    success=False,
+                    profile=profile,
+                    started_at=started_at,
+                    message="mirror_with_delete is not supported for FTP in the MVP.",
+                    log_file=str(log_path),
+                )
+
+            local_destination = Path(profile.destination).expanduser()
+            local_destination.mkdir(parents=True, exist_ok=True)
+            remote_root = PurePosixPath(profile.ftp_remote_path or "/")
+            connection_summary = self._connection_summary(profile)
+            logger.info("Starting FTP download: %s (passive=%s)", connection_summary, profile.ftp_passive)
+            if progress:
+                progress(f"Downloading from FTP {profile.ftp_host}:{remote_root}...")
+
+            ftp = self._connect(profile)
+            try:
+                copied = self._download_tree(
+                    ftp,
+                    remote_root,
+                    local_destination,
+                    logger,
+                    destination_root=local_destination,
+                    source_root=remote_root,
+                )
+            finally:
+                try:
+                    ftp.quit()
+                except ftplib.all_errors:
+                    ftp.close()
+
+            message = f"Downloaded {copied} file(s) from FTP."
+            logger.info(message)
+            if progress:
+                progress(message)
             return self.build_result(
-                success=False,
+                success=True,
                 profile=profile,
                 started_at=started_at,
-                message="mirror_with_delete is not supported for FTP in the MVP.",
+                message=message,
                 log_file=str(log_path),
+                output_file=str(local_destination),
             )
-
-        local_destination = Path(profile.destination).expanduser()
-        local_destination.mkdir(parents=True, exist_ok=True)
-        remote_root = PurePosixPath(profile.ftp_remote_path or "/")
-        connection_summary = self._connection_summary(profile)
-        logger.info("Starting FTP download: %s (passive=%s)", connection_summary, profile.ftp_passive)
-        if progress:
-            progress(f"Downloading from FTP {profile.ftp_host}:{remote_root}...")
-
-        ftp = self._connect(profile)
-        try:
-            copied = self._download_tree(ftp, remote_root, local_destination, logger)
         finally:
-            try:
-                ftp.quit()
-            except ftplib.all_errors:
-                ftp.close()
-
-        message = f"Downloaded {copied} file(s) from FTP."
-        logger.info(message)
-        if progress:
-            progress(message)
-        return self.build_result(
-            success=True,
-            profile=profile,
-            started_at=started_at,
-            message=message,
-            log_file=str(log_path),
-            output_file=str(local_destination),
-        )
+            self._close_logger_handlers(logger)

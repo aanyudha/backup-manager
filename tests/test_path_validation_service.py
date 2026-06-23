@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import app.services.path_validation_service as path_validation_module
@@ -14,9 +13,9 @@ def test_destination_validation_rejects_empty_value() -> None:
 
     assert valid is False
     assert "Destination validation failed:" in message
-    assert "Create Folder: skipped" in message
-    assert "Write Test: skipped" in message
-    assert "Delete Test: skipped" in message
+    assert "Mkdir Result: skipped" in message
+    assert "Open/Write Result: skipped" in message
+    assert "Delete Result: skipped" in message
     assert "Exception: ValueError: Destination folder is required." in message
 
 
@@ -26,13 +25,13 @@ def test_destination_validation_accepts_unc_like_path_without_mangling(monkeypat
     monkeypatch.setattr(
         PathValidationService,
         "ensure_destination_writable",
-        staticmethod(lambda path: (seen.append(path) or True, "")),
+        staticmethod(lambda path, destination_type="unknown": (seen.append(path) or True, "diagnostic")),
     )
 
     valid, message = PathValidationService.validate_destination_path(r"\\server\share\backup", "network")
 
     assert valid is True
-    assert message == ""
+    assert message == "diagnostic"
     assert seen == [r"\\server\share\backup"]
 
 
@@ -56,6 +55,9 @@ def test_destination_validation_does_not_call_resolve_for_unc_paths(monkeypatch)
             def __exit__(self, exc_type, exc, tb):  # type: ignore[no-untyped-def]
                 return False
 
+            def close(self) -> None:
+                return None
+
             def write(self, text: str) -> int:
                 return len(text)
 
@@ -73,7 +75,13 @@ def test_destination_validation_does_not_call_resolve_for_unc_paths(monkeypatch)
     valid, message = PathValidationService.ensure_destination_writable(unc_path)
 
     assert valid is True
-    assert message == ""
+    assert "Destination validation passed:" in message
+    assert f"Path Repr: {unc_path!r}" in message
+    assert "Mkdir Result: skipped (already exists)" in message
+    assert "Open/Write Result: ok" in message
+    assert "Flush Result: ok" in message
+    assert "Close Result: ok" in message
+    assert "Delete Result: ok" in message
     assert len(calls) == 2
     assert ("makedirs", unc_path) not in calls
     assert calls[0][0] == "open"
@@ -88,7 +96,9 @@ def test_destination_writable_check_creates_and_removes_temp_file(tmp_path: Path
     valid, message = PathValidationService.ensure_destination_writable(str(destination))
 
     assert valid is True
-    assert message == ""
+    assert "Destination validation passed:" in message
+    assert "Mkdir Result: ok" in message
+    assert "Delete Result: ok" in message
     assert destination.exists()
     assert list(destination.iterdir()) == []
 
@@ -104,7 +114,7 @@ def test_destination_validation_returns_clear_error_if_not_writable(tmp_path: Pa
     assert f"Path: {existing_file}" in message
     assert "Exists: true" in message
     assert "Is Dir: false" in message
-    assert "Create Folder: skipped" in message
-    assert "Write Test: skipped" in message
-    assert "Delete Test: skipped" in message
+    assert "Mkdir Result: skipped (already exists)" in message
+    assert "Open/Write Result: skipped" in message
+    assert "Delete Result: skipped" in message
     assert "Exception: NotADirectoryError:" in message

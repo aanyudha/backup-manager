@@ -548,12 +548,10 @@ class FolderProfilesPage(QWidget):
             self.destination_edit.text(),
             self._current_destination_type(),
         )
-        if valid:
-            success_message = f"Destination validation passed: {self.destination_edit.text().strip()}"
-            self.append_status(success_message)
-            QMessageBox.information(self, "Test Destination", success_message)
-            return
         self.append_status(message)
+        if valid:
+            QMessageBox.information(self, "Test Destination", message)
+            return
         QMessageBox.warning(self, "Test Destination", message)
 
     def _browse_source_folder(self) -> None:

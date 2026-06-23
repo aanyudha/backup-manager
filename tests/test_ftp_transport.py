@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -77,7 +77,11 @@ def test_ftp_password_is_masked_in_logs(tmp_path: Path, monkeypatch: pytest.Monk
             return None
 
     monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
-    monkeypatch.setattr(transport, "_download_tree", lambda ftp, remote, local, logger: 0)
+    monkeypatch.setattr(
+        transport,
+        "_download_tree",
+        lambda ftp, remote, local, logger, **kwargs: 0,
+    )
 
     result = transport.run(profile)
     assert result.log_file is not None
@@ -85,6 +89,85 @@ def test_ftp_password_is_masked_in_logs(tmp_path: Path, monkeypatch: pytest.Monk
 
     assert "secret" not in log_text
     assert "********" in log_text
+
+
+def test_ftp_transport_logs_target_details_before_each_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = FtpTransport(LogService(tmp_path / "logs"))
+    profile = build_ftp_profile(tmp_path)
+
+    class DummyFtp:
+        def retrbinary(self, command: str, callback) -> None:
+            callback(b"payload")
+
+        def quit(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_iter_remote_entries",
+        lambda ftp, remote_root: [(PurePosixPath("/exports/folder/file.txt"), {"type": "file"})],
+    )
+    monkeypatch.setattr(transport, "_remote_size", lambda ftp, remote_path, facts: None)
+    monkeypatch.setattr(transport, "_remote_timestamp", lambda ftp, remote_path, facts: None)
+
+    result = transport.run(profile)
+
+    assert result.log_file is not None
+    with open(result.log_file, encoding="utf-8") as handle:
+        log_text = handle.read()
+
+    assert "Destination root repr: " in log_text
+    assert repr(profile.destination) in log_text
+    assert "Remote root: /exports" in log_text
+    assert "Remote file: /exports/folder/file.txt" in log_text
+    assert "Relative path: folder/file.txt" in log_text
+    assert "Final local file repr: " in log_text
+    assert "Parent folder repr: " in log_text
+
+
+def test_ftp_transport_surfaces_local_write_failure_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = FtpTransport(LogService(tmp_path / "logs"))
+    profile = build_ftp_profile(tmp_path)
+    original_open = Path.open
+
+    class DummyFtp:
+        def quit(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_iter_remote_entries",
+        lambda ftp, remote_root: [(PurePosixPath("/exports/file.txt"), {"type": "file"})],
+    )
+    monkeypatch.setattr(transport, "_remote_size", lambda ftp, remote_path, facts: None)
+    monkeypatch.setattr(transport, "_remote_timestamp", lambda ftp, remote_path, facts: None)
+
+    def failing_open(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if self.name == "file.txt":
+            raise PermissionError("simulated local write failure")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr("app.transports.ftp_transport.Path.open", failing_open)
+
+    with pytest.raises(RuntimeError, match="Failed to write downloaded file\\."):
+        transport.run(profile)
+
+    log_files = sorted((tmp_path / "logs").glob("Remote_FTP_*.log"))
+    assert log_files
+    with open(log_files[0], encoding="utf-8") as handle:
+        log_text = handle.read()
+
+    assert "Failed to write downloaded file." in log_text
+    assert "Local file:" in log_text
+    assert "PermissionError: simulated local write failure" in log_text
 
 
 def test_folder_backup_engine_routes_ftp_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

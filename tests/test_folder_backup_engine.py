@@ -222,9 +222,20 @@ def test_ftp_run_uses_ftp_remote_path_not_source(tmp_path: Path, monkeypatch: py
 
     monkeypatch.setattr("app.transports.ftp_transport.FtpTransport._connect", lambda self, current: DummyFtp())
 
-    def fake_download(self, ftp, remote_root, local_root, logger):  # type: ignore[no-untyped-def]
+    def fake_download(  # type: ignore[no-untyped-def]
+        self,
+        ftp,
+        remote_root,
+        local_root,
+        logger,
+        *,
+        destination_root,
+        source_root,
+    ):
         captured["remote_root"] = remote_root
         captured["local_root"] = local_root
+        captured["destination_root"] = destination_root
+        captured["source_root"] = source_root
         return 0
 
     monkeypatch.setattr("app.transports.ftp_transport.FtpTransport._download_tree", fake_download)
@@ -234,6 +245,8 @@ def test_ftp_run_uses_ftp_remote_path_not_source(tmp_path: Path, monkeypatch: py
     assert result.success is True
     assert captured["remote_root"] == PurePosixPath("/exports")
     assert captured["local_root"] == destination
+    assert captured["destination_root"] == destination
+    assert captured["source_root"] == PurePosixPath("/exports")
 
 
 def test_ftp_destination_validation_happens_before_transport_run(
