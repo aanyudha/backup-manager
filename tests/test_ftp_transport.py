@@ -120,13 +120,16 @@ def test_ftp_transport_logs_target_details_before_each_write(
     with open(result.log_file, encoding="utf-8") as handle:
         log_text = handle.read()
 
-    assert "Destination root repr: " in log_text
-    assert repr(profile.destination) in log_text
-    assert "Remote root: /exports" in log_text
-    assert "Remote file: /exports/folder/file.txt" in log_text
-    assert "Relative path: folder/file.txt" in log_text
-    assert "Final local file repr: " in log_text
-    assert "Parent folder repr: " in log_text
+    expected_local = Path(profile.destination) / "folder" / "file.txt"
+    assert "REMOTE FILE:\n/exports/folder/file.txt" in log_text
+    assert f"LOCAL FILE:\n{expected_local}" in log_text
+    assert f"PARENT:\n{expected_local.parent}" in log_text
+    assert f"Creating parent:\n{expected_local.parent}" in log_text
+    assert f"Opening:\n{expected_local}" in log_text
+    assert f"Writing:\n{expected_local}" in log_text
+    assert "Bytes:\n7" in log_text
+    assert f"Flushing:\n{expected_local}" in log_text
+    assert f"Closing:\n{expected_local}" in log_text
 
 
 def test_ftp_transport_surfaces_local_write_failure_details(
@@ -157,7 +160,7 @@ def test_ftp_transport_surfaces_local_write_failure_details(
 
     monkeypatch.setattr("app.transports.ftp_transport.Path.open", failing_open)
 
-    with pytest.raises(RuntimeError, match="Failed to write downloaded file\\."):
+    with pytest.raises(RuntimeError, match="FTP Write Failure"):
         transport.run(profile)
 
     log_files = sorted((tmp_path / "logs").glob("Remote_FTP_*.log"))
@@ -165,9 +168,69 @@ def test_ftp_transport_surfaces_local_write_failure_details(
     with open(log_files[0], encoding="utf-8") as handle:
         log_text = handle.read()
 
-    assert "Failed to write downloaded file." in log_text
-    assert "Local file:" in log_text
-    assert "PermissionError: simulated local write failure" in log_text
+    expected_local = Path(profile.destination) / "file.txt"
+    assert "FTP Write Failure" in log_text
+    assert "Remote File:\n/exports/file.txt" in log_text
+    assert f"Local File:\n{expected_local}" in log_text
+    assert f"Parent:\n{expected_local.parent}" in log_text
+    assert "Operation:\nopen" in log_text
+    assert "Exception:\n<class 'PermissionError'>\nsimulated local write failure" in log_text
+
+
+def test_ftp_transport_stops_after_first_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = FtpTransport(LogService(tmp_path / "logs"))
+    profile = build_ftp_profile(tmp_path)
+    retrbinary_commands: list[str] = []
+    opened_files: list[str] = []
+
+    class DummyHandle:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def write(self, data: bytes) -> int:
+            if self.path.name == "first.txt":
+                raise OSError("simulated write failure")
+            return len(data)
+
+        def flush(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    class DummyFtp:
+        def retrbinary(self, command: str, callback) -> None:
+            retrbinary_commands.append(command)
+            callback(b"payload")
+
+        def quit(self) -> None:
+            return None
+
+    def fake_open(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        opened_files.append(self.name)
+        return DummyHandle(self)
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_iter_remote_entries",
+        lambda ftp, remote_root: [
+            (PurePosixPath("/exports/first.txt"), {"type": "file"}),
+            (PurePosixPath("/exports/second.txt"), {"type": "file"}),
+        ],
+    )
+    monkeypatch.setattr(transport, "_remote_size", lambda ftp, remote_path, facts: None)
+    monkeypatch.setattr(transport, "_remote_timestamp", lambda ftp, remote_path, facts: None)
+    monkeypatch.setattr("app.transports.ftp_transport.Path.open", fake_open)
+
+    with pytest.raises(RuntimeError, match="Operation:\nwrite"):
+        transport.run(profile)
+
+    assert retrbinary_commands == ["RETR /exports/first.txt"]
+    assert opened_files == ["first.txt"]
 
 
 def test_folder_backup_engine_routes_ftp_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
