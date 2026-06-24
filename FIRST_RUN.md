@@ -70,7 +70,8 @@ python app.py
 18. Use `Test Connection` to validate the credentials.
 19. Use `Connect/Test Network Share` or `Test Destination` if you configured a UNC destination.
 20. Use `Load Database List` to fetch selectable databases.
-21. Click `Save Profile`.
+21. On older NAS/SMB devices, a successful MySQL dump can still show a post-backup verification warning if the share briefly rejects read or stat calls after the file is written. In that case, confirm the file in Explorer or with `Test Destination`.
+22. Click `Save Profile`.
 
 ## How To Create a Folder Profile
 
@@ -258,6 +259,7 @@ python -m PyInstaller --noconfirm --windowed --name HeisenbergBackupManager app.
 - Metadata file: `config/backup_metadata.json`
 - SHA256 appears in the metadata file for successful file-based backups.
 - SHA256 and file size are also appended to the backup run log and live output.
+- On older NAS/SMB devices, post-backup verification may be skipped with a warning if the network briefly rejects read or stat access right after a successful write.
 
 ## Known MVP Limitations
 

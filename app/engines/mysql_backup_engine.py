@@ -16,6 +16,7 @@ from app.models.profile import MySQLBackupProfile
 from app.models.result import BackupResult
 from app.services.compression_service import CompressionService, CompressionServiceError
 from app.services.log_service import LogService
+from app.services.network_error_service import is_network_transient_error
 from app.services.path_validation_service import PathValidationService
 from app.services.platform_service import PlatformService
 from app.services.windows_network_share_service import (
@@ -382,6 +383,23 @@ class MySQLBackupEngine(BaseBackupEngine):
         if progress:
             progress(message)
 
+        output_file: str | None = None
+        if output_path is not None:
+            output_file = str(output_path)
+            if not success:
+                try:
+                    if not output_path.exists():
+                        output_file = None
+                except OSError as exc:
+                    if is_network_transient_error(exc, output_path, destination_type=profile.destination_type):
+                        logger.warning(
+                            "Ignoring transient network error while probing output path %s: %s",
+                            output_path,
+                            exc,
+                        )
+                    else:
+                        raise
+
         return BackupResult(
             success=success,
             backup_type="mysql",
@@ -392,5 +410,5 @@ class MySQLBackupEngine(BaseBackupEngine):
             exit_code=completed.returncode,
             message=message,
             log_file=str(log_path),
-            output_file=str(output_path) if output_path and output_path.exists() else None,
+            output_file=output_file,
         )

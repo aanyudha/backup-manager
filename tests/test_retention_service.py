@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from app.models.backup_metadata import BackupMetadata
 from app.models.profile import MySQLBackupProfile
 from app.repositories.backup_metadata_repository import BackupMetadataRepository
@@ -56,9 +58,10 @@ def test_retention_disabled_deletes_nothing(tmp_path: Path) -> None:
     repository = BackupMetadataRepository(tmp_path / "config")
     repository.add(build_metadata(artifact, profile_id=profile.id, age_days=30))
 
-    deleted = RetentionService().apply_profile_retention(profile, repository)
+    outcome = RetentionService().apply_profile_retention(profile, repository)
 
-    assert deleted == []
+    assert outcome.deleted_entries == []
+    assert outcome.warnings == []
     assert artifact.exists()
 
 
@@ -70,10 +73,11 @@ def test_retention_enabled_deletes_old_file_and_marks_metadata(tmp_path: Path) -
     repository = BackupMetadataRepository(tmp_path / "config")
     repository.add(build_metadata(artifact, profile_id=profile.id, age_days=30))
 
-    deleted = RetentionService().apply_profile_retention(profile, repository)
+    outcome = RetentionService().apply_profile_retention(profile, repository)
     stored = repository.list()
 
-    assert len(deleted) == 1
+    assert len(outcome.deleted_entries) == 1
+    assert outcome.warnings == []
     assert artifact.exists() is False
     assert stored[0].deleted_by_retention is True
     assert stored[0].deleted_at is not None
@@ -86,9 +90,10 @@ def test_retention_does_not_delete_unknown_files(tmp_path: Path) -> None:
     unknown.write_bytes(b"backup")
     repository = BackupMetadataRepository(tmp_path / "config")
 
-    deleted = RetentionService().apply_profile_retention(profile, repository)
+    outcome = RetentionService().apply_profile_retention(profile, repository)
 
-    assert deleted == []
+    assert outcome.deleted_entries == []
+    assert outcome.warnings == []
     assert unknown.exists()
 
 
@@ -103,7 +108,33 @@ def test_retention_days_zero_deletes_nothing(tmp_path: Path) -> None:
     repository = BackupMetadataRepository(tmp_path / "config")
     repository.add(build_metadata(artifact, profile_id=profile.id, age_days=30))
 
-    deleted = RetentionService().apply_profile_retention(profile, repository)
+    outcome = RetentionService().apply_profile_retention(profile, repository)
 
-    assert deleted == []
+    assert outcome.deleted_entries == []
+    assert outcome.warnings == []
+    assert artifact.exists()
+
+
+def test_retention_network_transient_delete_error_returns_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Transient UNC delete failures should become warnings instead of hard failures."""
+    profile = build_profile(tmp_path, enabled=True, days=7)
+    profile.destination_type = "network"
+    artifact = tmp_path / "backup.sql.gz"
+    artifact.write_bytes(b"backup")
+    repository = BackupMetadataRepository(tmp_path / "config")
+    repository.add(build_metadata(artifact, profile_id=profile.id, age_days=30))
+    original_unlink = Path.unlink
+
+    def flaky_unlink(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if self == artifact:
+            raise OSError(59, "An unexpected network error occurred")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+
+    outcome = RetentionService().apply_profile_retention(profile, repository)
+
+    assert outcome.deleted_entries == []
+    assert len(outcome.warnings) == 1
+    assert "An unexpected network error occurred" in outcome.warnings[0]
     assert artifact.exists()

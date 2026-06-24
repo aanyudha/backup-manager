@@ -62,6 +62,7 @@ def stub_versions(monkeypatch: pytest.MonkeyPatch, engine: MySQLBackupEngine) ->
     """Prevent tests from making real version lookups."""
     monkeypatch.setattr(engine, "get_mysql_version", lambda profile: "8.0.36")
     monkeypatch.setattr(engine, "get_mysqldump_version", lambda executable: "mysqldump 8.0.36")
+    monkeypatch.setattr(engine.platform_service, "is_windows", lambda: False)
 
 
 def test_mysqldump_log_command_masks_password(tmp_path: Path) -> None:
@@ -262,6 +263,37 @@ def test_uncompressed_mysql_backup_keeps_sql_output(
     assert result.output_file is not None
     assert result.output_file.endswith(".sql")
     assert not result.output_file.endswith(".sql.gz")
+
+
+def test_successful_network_mysql_backup_keeps_output_path_without_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Successful UNC-target dumps should not require a fragile exists() probe."""
+    engine = MySQLBackupEngine(LogService(tmp_path))
+    profile = build_mysql_profile(tmp_path)
+    profile.destination_type = "network"
+    stub_versions(monkeypatch, engine)
+
+    def fake_run(args: list[str], stdout=None, stderr=None, env=None, check=False):  # type: ignore[no-untyped-def]
+        stdout.write(b"-- plain dump --")
+        return subprocess.CompletedProcess(args=args, returncode=0, stderr=b"")
+
+    original_exists = Path.exists
+
+    def guarded_exists(self: Path) -> bool:
+        if self.parent == Path(profile.destination) and self.suffix == ".sql":
+            raise OSError(59, "An unexpected network error occurred")
+        return original_exists(self)
+
+    monkeypatch.setattr("app.services.compression_service.subprocess.run", fake_run)
+    monkeypatch.setattr("pathlib.Path.exists", guarded_exists)
+
+    result = engine.run(profile)
+
+    assert result.success is True
+    assert result.output_file is not None
+    assert result.output_file.endswith(".sql")
 
 
 def test_compression_failure_marks_backup_failed(

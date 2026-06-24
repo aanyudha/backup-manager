@@ -275,6 +275,7 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - `Network/Mounted Folder` means an OS-accessible filesystem path.
 - For Windows UNC destinations, you can optionally fill the `Windows Network Login` section with username, password, domain, and `remember session`.
 - The app only does a Windows `net use` pre-connect for UNC destinations when credentials are supplied.
+- On older NAS/SMB devices, post-backup verification may be skipped with a warning if the network briefly rejects read or stat calls after a successful write. Check the backup file manually, with `Test Destination`, or in Explorer if needed.
 - Leave the profile `mysqldump Path` blank to auto-detect `mysqldump` from `PATH`.
 
 ## Compression
@@ -290,6 +291,7 @@ python -m PyInstaller --noconfirm --name heisenberg-backup-manager app.py
 - Metadata entries include the profile, output path, SHA256 hash, file size, duration, and result message.
 - SHA256 and file size details are written to the run log and shown in live backup output.
 - Missing or non-file outputs are skipped safely without crashing the backup flow.
+- On older NAS/SMB devices, transient post-write read failures may leave the backup successful while logging a verification warning instead of failing the run.
 
 Folder backup verification and retention:
 Folder backup outputs are directories. In v0.2.0, SHA256 and retention are applied to file artifacts such as MySQL dump files. Folder backup manifest verification is planned for a later release.

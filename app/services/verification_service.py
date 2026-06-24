@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.models.backup_metadata import BackupMetadata
 from app.models.result import BackupResult
+from app.services.network_error_service import is_network_transient_error
+
+
+@dataclass(frozen=True)
+class VerificationOutcome:
+    """Result of attempting to build verification metadata."""
+
+    metadata: BackupMetadata | None = None
+    warning: str | None = None
 
 
 class VerificationService:
@@ -47,3 +57,19 @@ class VerificationService:
             success=result.success,
             message=result.message,
         )
+
+    def build_metadata_outcome(
+        self,
+        result: BackupResult,
+        *,
+        destination_type: str = "local",
+    ) -> VerificationOutcome:
+        """Build metadata, downgrading transient UNC read failures to warnings."""
+        try:
+            return VerificationOutcome(metadata=self.build_metadata(result))
+        except Exception as exc:
+            if is_network_transient_error(exc, result.output_file, destination_type=destination_type):
+                return VerificationOutcome(
+                    warning=f"{type(exc).__name__}: {exc}",
+                )
+            raise
