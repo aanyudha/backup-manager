@@ -52,6 +52,10 @@ class PathService:
         """Return the writable logs directory."""
         return self.writable_root() / "logs"
 
+    def temp_dir(self) -> Path:
+        """Return the writable runtime temp directory."""
+        return self.writable_root() / "temp"
+
     def exports_scheduler_dir(self) -> Path:
         """Return where external scheduler exports should be written."""
         return self.writable_root() / "exports" / "scheduler"

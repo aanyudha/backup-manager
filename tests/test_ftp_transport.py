@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +13,7 @@ from app.models.profile import FolderBackupProfile, parse_profile
 from app.models.result import BackupResult
 from app.services.log_service import LogService
 from app.services.platform_service import PlatformService
+from app.services.staging_service import RobocopyResult
 from app.transports.ftp_transport import FtpTransport
 
 
@@ -277,6 +279,21 @@ def test_existing_unc_destination_does_not_trigger_mkdir_destination_root(
         "_download_tree",
         lambda ftp, remote, local, logger, *args, **kwargs: 0,
     )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "create_staging_folder",
+        lambda profile_name_or_id: (tmp_path / "temp" / "stage-a").mkdir(parents=True, exist_ok=True) or (tmp_path / "temp" / "stage-a"),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "copy_staging_to_destination_with_robocopy",
+        lambda staging, current_destination: RobocopyResult(["robocopy"], 1, "copied"),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "cleanup_staging_folder",
+        lambda path: None,
+    )
     monkeypatch.setattr("app.transports.ftp_transport.Path.exists", fake_exists)
     monkeypatch.setattr("app.transports.ftp_transport.Path.is_dir", fake_is_dir)
     monkeypatch.setattr("app.transports.ftp_transport.Path.mkdir", fail_mkdir)
@@ -325,6 +342,21 @@ def test_ftp_transport_avoids_winerror_59_when_unc_destination_root_exists(
         transport,
         "_download_tree",
         lambda ftp, remote, local, logger, *args, **kwargs: 0,
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "create_staging_folder",
+        lambda profile_name_or_id: (tmp_path / "temp" / "stage-b").mkdir(parents=True, exist_ok=True) or (tmp_path / "temp" / "stage-b"),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "copy_staging_to_destination_with_robocopy",
+        lambda staging, current_destination: RobocopyResult(["robocopy"], 1, "copied"),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "cleanup_staging_folder",
+        lambda path: None,
     )
     monkeypatch.setattr("app.transports.ftp_transport.Path.exists", fake_exists)
     monkeypatch.setattr("app.transports.ftp_transport.Path.is_dir", fake_is_dir)
@@ -470,6 +502,145 @@ def test_ftp_transport_logs_first_file_only_once(
     assert log_text.count("Remote File:\n") == 1
     assert log_text.count("Local File:\n") == 1
     assert "Remote File:\n/exports/first.txt" in log_text
+
+
+def test_ftp_transport_uses_local_staging_for_windows_unc_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_service = PlatformService()
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    transport = FtpTransport(LogService(tmp_path / "logs"), platform_service=platform_service)
+    profile = build_ftp_profile(
+        tmp_path,
+        source_type="ftp",
+        destination=r"\\192.168.23.6\Backup\1.55\folder",
+        destination_type="network",
+    )
+    staging_path = tmp_path / "temp" / "heisenberg_staging" / "folder-1" / "run"
+    staged_roots: list[Path] = []
+    cleanup_calls: list[Path] = []
+    copy_calls: list[tuple[Path, Path]] = []
+    progress_messages: list[str] = []
+
+    class DummyFtp:
+        def quit(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_download_tree",
+        lambda ftp, remote, local, logger, *args, **kwargs: (staged_roots.append(local) or 1),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "create_staging_folder",
+        lambda profile_name_or_id: (staging_path.mkdir(parents=True, exist_ok=True) or staging_path),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "copy_staging_to_destination_with_robocopy",
+        lambda staging, destination: (
+            copy_calls.append((Path(staging), Path(destination)))
+            or RobocopyResult(["robocopy", str(staging), str(destination)], 1, "copied")
+        ),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "cleanup_staging_folder",
+        lambda path: cleanup_calls.append(Path(path)),
+    )
+
+    result = transport.run(profile, progress_messages.append)
+
+    assert result.success is True
+    assert result.output_file == profile.destination
+    assert staged_roots == [staging_path]
+    assert copy_calls == [(staging_path, Path(profile.destination))]
+    assert cleanup_calls == [staging_path]
+    assert "Using local staging for network destination reliability." in progress_messages
+    log_text = Path(result.log_file or "").read_text(encoding="utf-8")
+    assert "Strategy:\nlocal staging + robocopy" in log_text
+    assert f"Staging Folder:\n{staging_path}" in log_text
+    assert "Robocopy Exit Code:\n1" in log_text
+
+
+def test_ftp_transport_keeps_staging_folder_when_robocopy_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_service = PlatformService()
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    transport = FtpTransport(LogService(tmp_path / "logs"), platform_service=platform_service)
+    profile = build_ftp_profile(
+        tmp_path,
+        source_type="ftp",
+        destination=r"\\192.168.23.6\Backup\1.55\folder",
+        destination_type="network",
+    )
+    staging_path = tmp_path / "temp" / "heisenberg_staging" / "folder-1" / "run"
+    cleanup_calls: list[Path] = []
+
+    class DummyFtp:
+        def quit(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(transport, "_download_tree", lambda ftp, remote, local, logger, *args, **kwargs: 1)
+    monkeypatch.setattr(
+        transport.staging_service,
+        "create_staging_folder",
+        lambda profile_name_or_id: (staging_path.mkdir(parents=True, exist_ok=True) or staging_path),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "copy_staging_to_destination_with_robocopy",
+        lambda staging, destination: RobocopyResult(["robocopy"], 8, "failed"),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "cleanup_staging_folder",
+        lambda path: cleanup_calls.append(Path(path)),
+    )
+
+    with pytest.raises(RuntimeError, match="Staging Folder Kept"):
+        transport.run(profile)
+
+    assert staging_path.exists()
+    assert cleanup_calls == []
+
+
+def test_ftp_transport_local_destination_does_not_use_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_service = PlatformService()
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    transport = FtpTransport(LogService(tmp_path / "logs"), platform_service=platform_service)
+    profile = build_ftp_profile(tmp_path, source_type="ftp")
+    local_roots: list[Path] = []
+
+    class DummyFtp:
+        def quit(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_download_tree",
+        lambda ftp, remote, local, logger, *args, **kwargs: (local_roots.append(local) or 0),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "create_staging_folder",
+        lambda profile_name_or_id: (_ for _ in ()).throw(AssertionError("staging should not be used")),
+    )
+
+    result = transport.run(profile)
+
+    assert result.success is True
+    assert local_roots == [Path(profile.destination)]
 
 
 def test_folder_backup_engine_routes_ftp_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

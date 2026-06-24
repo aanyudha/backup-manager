@@ -13,6 +13,7 @@ __all__ = [
     "RemoteBrowserService",
     "RestoreService",
     "SchedulerService",
+    "StagingService",
     "RetentionService",
     "VerificationService",
 ]
@@ -60,6 +61,10 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from app.services.scheduler_service import SchedulerService
 
         return SchedulerService
+    if name == "StagingService":
+        from app.services.staging_service import StagingService
+
+        return StagingService
     if name == "RestoreService":
         from app.services.restore_service import RestoreService
 

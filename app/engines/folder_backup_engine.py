@@ -228,9 +228,9 @@ class FolderBackupEngine(BaseBackupEngine):
             elif selected_engine == "rsync":
                 result = RsyncTransport(self.log_service, self.platform_service).run(profile, progress)
             elif selected_engine == "sftp":
-                result = SftpTransport(self.log_service).run(profile, progress)
+                result = SftpTransport(self.log_service, platform_service=self.platform_service).run(profile, progress)
             elif selected_engine == "ftp":
-                result = FtpTransport(self.log_service).run(profile, progress)
+                result = FtpTransport(self.log_service, platform_service=self.platform_service).run(profile, progress)
             else:
                 raise RuntimeError(f"Unsupported folder engine: {selected_engine}")
         finally:

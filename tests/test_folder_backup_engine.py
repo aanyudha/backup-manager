@@ -429,3 +429,46 @@ def test_local_destination_does_not_call_net_use(tmp_path: Path, monkeypatch: py
     result = engine.run(profile)
 
     assert result.success is True
+
+
+def test_local_source_unc_destination_does_not_use_remote_staging_transports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, platform_service = build_engine(tmp_path)
+    source_dir = tmp_path / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    profile = build_profile(
+        tmp_path,
+        source=str(source_dir),
+        destination=r"\\server\share\backup",
+        destination_type="network",
+    )
+
+    monkeypatch.setattr(platform_service, "is_windows", lambda: False)
+    monkeypatch.setattr(platform_service, "command_exists", lambda command: False)
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (True, "ok"),
+    )
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.FtpTransport.run",
+        lambda self, current_profile, progress=None: (_ for _ in ()).throw(
+            AssertionError("ftp transport should not run for local sources")
+        ),
+    )
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.SftpTransport.run",
+        lambda self, current_profile, progress=None: (_ for _ in ()).throw(
+            AssertionError("sftp transport should not run for local sources")
+        ),
+    )
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.LocalCopyTransport.run",
+        lambda self, current_profile, progress=None: build_result(current_profile, "Copied 1 file(s)"),
+    )
+
+    result = engine.run(profile)
+
+    assert result.success is True

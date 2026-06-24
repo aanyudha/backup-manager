@@ -10,6 +10,8 @@ import pytest
 
 from app.models.profile import FolderBackupProfile
 from app.services.log_service import LogService
+from app.services.platform_service import PlatformService
+from app.services.staging_service import RobocopyResult
 from app.transports.sftp_transport import SftpTransport
 
 
@@ -158,3 +160,61 @@ def test_sftp_transport_creates_file_parent_only_when_missing(
     assert result.success is True
     assert expected_parent.exists()
     assert mkdir_targets.count(expected_parent) == 1
+
+
+def test_sftp_transport_uses_local_staging_for_windows_unc_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_service = PlatformService()
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    transport = SftpTransport(LogService(tmp_path / "logs"), platform_service=platform_service)
+    profile = build_sftp_profile(
+        tmp_path,
+        source_type="sftp",
+        destination=r"\\192.168.23.6\Backup\1.55\folder",
+        destination_type="network",
+    )
+    staging_path = tmp_path / "temp" / "heisenberg_staging" / "folder-1" / "run"
+    staged_roots: list[Path] = []
+    cleanup_calls: list[Path] = []
+    copy_calls: list[tuple[Path, Path]] = []
+    progress_messages: list[str] = []
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummySftpClient())
+    monkeypatch.setattr(
+        transport,
+        "_download_tree",
+        lambda client, remote, local, logger: (staged_roots.append(local) or 1),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "create_staging_folder",
+        lambda profile_name_or_id: (staging_path.mkdir(parents=True, exist_ok=True) or staging_path),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "copy_staging_to_destination_with_robocopy",
+        lambda staging, destination: (
+            copy_calls.append((Path(staging), Path(destination)))
+            or RobocopyResult(["robocopy", str(staging), str(destination)], 3, "copied")
+        ),
+    )
+    monkeypatch.setattr(
+        transport.staging_service,
+        "cleanup_staging_folder",
+        lambda path: cleanup_calls.append(Path(path)),
+    )
+
+    result = transport.run(profile, progress_messages.append)
+
+    assert result.success is True
+    assert result.output_file == profile.destination
+    assert staged_roots == [staging_path]
+    assert copy_calls == [(staging_path, Path(profile.destination))]
+    assert cleanup_calls == [staging_path]
+    assert "Using local staging for network destination reliability." in progress_messages
+    log_text = Path(result.log_file or "").read_text(encoding="utf-8")
+    assert "Strategy:\nlocal staging + robocopy" in log_text
+    assert f"Staging Folder:\n{staging_path}" in log_text
+    assert "Robocopy Exit Code:\n3" in log_text
