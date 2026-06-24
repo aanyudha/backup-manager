@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.models.profile import FolderBackupProfile
 from app.models.result import BackupResult
@@ -47,3 +48,15 @@ class BaseTransport(ABC):
             log_file=log_file,
             output_file=output_file,
         )
+
+    @staticmethod
+    def ensure_local_directory(path: Path) -> None:
+        """Create a local directory only when it is missing."""
+        if path.exists():
+            if not path.is_dir():
+                raise NotADirectoryError(f"Destination is not a directory: {path}")
+            return
+
+        path.mkdir(parents=True, exist_ok=True)
+        if not path.is_dir():
+            raise NotADirectoryError(f"Destination is not a directory: {path}")

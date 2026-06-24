@@ -121,18 +121,218 @@ def test_ftp_transport_logs_destination_and_first_file_details(
         log_text = handle.read()
 
     expected_local = Path(profile.destination) / "folder" / "file.txt"
-    expected_parent = expected_local.parent
     expected_destination = Path(profile.destination)
 
     assert f"Destination Root:\n{expected_destination}" in log_text
     assert "Remote File:\n/exports/folder/file.txt" in log_text
     assert f"Local File:\n{expected_local}" in log_text
-    assert f"Operation:\nmkdir destination root\n\nTarget:\n{expected_destination}\n\nResult:\nOK" in log_text
-    assert f"Operation:\nmkdir parent\n\nTarget:\n{expected_parent}\n\nResult:\nOK" in log_text
-    assert f"Operation:\nopen destination file\n\nTarget:\n{expected_local}\n\nResult:\nOK" in log_text
-    assert f"Operation:\nwrite chunk\n\nTarget:\n{expected_local}\n\nResult:\nOK" in log_text
-    assert f"Operation:\nflush\n\nTarget:\n{expected_local}\n\nResult:\nOK" in log_text
-    assert f"Operation:\nclose\n\nTarget:\n{expected_local}\n\nResult:\nOK" in log_text
+    assert "Operation:\n" not in log_text
+
+
+def test_ftp_transport_skips_mkdir_destination_root_when_destination_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = FtpTransport(LogService(tmp_path / "logs"))
+    profile = build_ftp_profile(tmp_path)
+    destination = Path(profile.destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    original_mkdir = Path.mkdir
+    mkdir_targets: list[Path] = []
+
+    class DummyFtp:
+        def quit(self) -> None:
+            return None
+
+    def guarded_mkdir(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        mkdir_targets.append(self)
+        if self == destination:
+            raise AssertionError("destination root mkdir should be skipped")
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_download_tree",
+        lambda ftp, remote, local, logger, *args, **kwargs: 0,
+    )
+    monkeypatch.setattr("app.transports.ftp_transport.Path.mkdir", guarded_mkdir)
+
+    result = transport.run(profile)
+
+    assert result.success is True
+    assert destination not in mkdir_targets
+
+
+def test_ftp_transport_creates_destination_root_only_when_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = FtpTransport(LogService(tmp_path / "logs"))
+    profile = build_ftp_profile(tmp_path)
+    destination = Path(profile.destination)
+    original_mkdir = Path.mkdir
+    mkdir_targets: list[Path] = []
+
+    class DummyFtp:
+        def quit(self) -> None:
+            return None
+
+    def tracking_mkdir(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        mkdir_targets.append(self)
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_download_tree",
+        lambda ftp, remote, local, logger, *args, **kwargs: 0,
+    )
+    monkeypatch.setattr("app.transports.ftp_transport.Path.mkdir", tracking_mkdir)
+
+    result = transport.run(profile)
+
+    assert result.success is True
+    assert destination.exists()
+    assert destination in mkdir_targets
+
+
+def test_ftp_transport_creates_file_parent_only_when_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = FtpTransport(LogService(tmp_path / "logs"))
+    profile = build_ftp_profile(tmp_path)
+    destination = Path(profile.destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    original_mkdir = Path.mkdir
+    mkdir_targets: list[Path] = []
+
+    class DummyFtp:
+        def retrbinary(self, command: str, callback) -> None:
+            callback(b"payload")
+
+        def quit(self) -> None:
+            return None
+
+    def tracking_mkdir(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        mkdir_targets.append(self)
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_iter_remote_entries",
+        lambda ftp, remote_root: [(PurePosixPath("/exports/folder/file.txt"), {"type": "file"})],
+    )
+    monkeypatch.setattr(transport, "_remote_size", lambda ftp, remote_path, facts: None)
+    monkeypatch.setattr(transport, "_remote_timestamp", lambda ftp, remote_path, facts: None)
+    monkeypatch.setattr("app.transports.ftp_transport.Path.mkdir", tracking_mkdir)
+
+    result = transport.run(profile)
+
+    expected_parent = destination / "folder"
+    assert result.success is True
+    assert expected_parent.exists()
+    assert mkdir_targets.count(expected_parent) == 1
+
+
+def test_existing_unc_destination_does_not_trigger_mkdir_destination_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = r"\\192.168.23.6\Backup\1.55\folder"
+    transport = FtpTransport(LogService(tmp_path / "logs"))
+    profile = build_ftp_profile(
+        tmp_path,
+        destination=destination,
+        destination_type="network",
+    )
+    original_exists = Path.exists
+    original_is_dir = Path.is_dir
+    original_mkdir = Path.mkdir
+
+    class DummyFtp:
+        def quit(self) -> None:
+            return None
+
+    def fake_exists(self) -> bool:  # type: ignore[no-untyped-def]
+        if str(self) == destination:
+            return True
+        return original_exists(self)
+
+    def fake_is_dir(self) -> bool:  # type: ignore[no-untyped-def]
+        if str(self) == destination:
+            return True
+        return original_is_dir(self)
+
+    def fail_mkdir(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if str(self) == destination:
+            raise AssertionError("UNC destination root mkdir should be skipped")
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_download_tree",
+        lambda ftp, remote, local, logger, *args, **kwargs: 0,
+    )
+    monkeypatch.setattr("app.transports.ftp_transport.Path.exists", fake_exists)
+    monkeypatch.setattr("app.transports.ftp_transport.Path.is_dir", fake_is_dir)
+    monkeypatch.setattr("app.transports.ftp_transport.Path.mkdir", fail_mkdir)
+
+    result = transport.run(profile)
+
+    assert result.success is True
+
+
+def test_ftp_transport_avoids_winerror_59_when_unc_destination_root_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = r"\\192.168.23.6\Backup\1.55\folder"
+    transport = FtpTransport(LogService(tmp_path / "logs"))
+    profile = build_ftp_profile(
+        tmp_path,
+        destination=destination,
+        destination_type="network",
+    )
+    original_exists = Path.exists
+    original_is_dir = Path.is_dir
+    original_mkdir = Path.mkdir
+
+    class DummyFtp:
+        def quit(self) -> None:
+            return None
+
+    def fake_exists(self) -> bool:  # type: ignore[no-untyped-def]
+        if str(self) == destination:
+            return True
+        return original_exists(self)
+
+    def fake_is_dir(self) -> bool:  # type: ignore[no-untyped-def]
+        if str(self) == destination:
+            return True
+        return original_is_dir(self)
+
+    def winerror_59(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if str(self) == destination:
+            raise OSError(59, "An unexpected network error occurred")
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_download_tree",
+        lambda ftp, remote, local, logger, *args, **kwargs: 0,
+    )
+    monkeypatch.setattr("app.transports.ftp_transport.Path.exists", fake_exists)
+    monkeypatch.setattr("app.transports.ftp_transport.Path.is_dir", fake_is_dir)
+    monkeypatch.setattr("app.transports.ftp_transport.Path.mkdir", winerror_59)
+
+    result = transport.run(profile)
+
+    assert result.success is True
 
 
 def test_ftp_transport_surfaces_local_write_failure_details(

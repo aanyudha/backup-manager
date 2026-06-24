@@ -32,6 +32,45 @@ class SftpTransport(BaseTransport):
             transport.connect(username=profile.sftp_username, password=profile.sftp_password or "")
         return paramiko.SFTPClient.from_transport(transport)
 
+    @staticmethod
+    def _log_operation_failure(
+        logger,
+        *,
+        operation: str,
+        target: Path | str,
+        exception: Exception,
+    ) -> None:
+        """Log one failed filesystem operation in a concise diagnostic format."""
+        logger.info(
+            "Operation:\n%s\n\nTarget:\n%s\n\nException:\n%s\n%s",
+            operation,
+            target,
+            exception.__class__,
+            exception,
+        )
+
+    def _raise_local_write_failure(
+        self,
+        logger,
+        *,
+        operation: str,
+        target: Path | str,
+        exception: Exception,
+    ) -> None:
+        """Raise a detailed SFTP write failure with concise logger context."""
+        self._log_operation_failure(
+            logger,
+            operation=operation,
+            target=target,
+            exception=exception,
+        )
+        raise RuntimeError(
+            "SFTP Write Failure\n\n"
+            f"Operation:\n{operation}\n\n"
+            f"Target:\n{target}\n\n"
+            f"Exception:\n{exception.__class__}\n{exception}"
+        ) from exception
+
     def _download_tree(
         self,
         client: paramiko.SFTPClient,
@@ -45,7 +84,15 @@ class SftpTransport(BaseTransport):
             remote_path = remote_root / entry.filename
             local_path = local_root / entry.filename
             if stat.S_ISDIR(entry.st_mode):
-                local_path.mkdir(parents=True, exist_ok=True)
+                try:
+                    self.ensure_local_directory(local_path)
+                except Exception as exc:
+                    self._raise_local_write_failure(
+                        logger,
+                        operation="mkdir parent",
+                        target=local_path,
+                        exception=exc,
+                    )
                 copied += self._download_tree(client, remote_path, local_path, logger)
                 continue
 
@@ -54,7 +101,24 @@ class SftpTransport(BaseTransport):
                 local_mtime = int(local_path.stat().st_mtime)
                 should_copy = entry.st_mtime > local_mtime or entry.st_size != local_path.stat().st_size
             if should_copy:
-                client.get(str(remote_path), str(local_path))
+                try:
+                    self.ensure_local_directory(local_path.parent)
+                except Exception as exc:
+                    self._raise_local_write_failure(
+                        logger,
+                        operation="mkdir parent",
+                        target=local_path.parent,
+                        exception=exc,
+                    )
+                try:
+                    client.get(str(remote_path), str(local_path))
+                except Exception as exc:
+                    self._raise_local_write_failure(
+                        logger,
+                        operation="download file",
+                        target=local_path,
+                        exception=exc,
+                    )
                 copied += 1
                 logger.info("Downloaded %s", remote_path)
         return copied
@@ -73,7 +137,15 @@ class SftpTransport(BaseTransport):
             )
 
         local_destination = Path(profile.destination).expanduser()
-        local_destination.mkdir(parents=True, exist_ok=True)
+        try:
+            self.ensure_local_directory(local_destination)
+        except Exception as exc:
+            self._raise_local_write_failure(
+                logger,
+                operation="mkdir destination root",
+                target=local_destination,
+                exception=exc,
+            )
         remote_root = PurePosixPath(profile.sftp_remote_path or "/")
         if progress:
             progress(f"Downloading from SFTP {profile.sftp_host}:{remote_root}...")
