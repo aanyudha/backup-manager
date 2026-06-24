@@ -35,6 +35,49 @@ class FtpTransport(BaseTransport):
         if not profile.destination.strip():
             raise RuntimeError("Destination path is required.")
 
+    @staticmethod
+    def _log_operation(logger, operation: str, target: Path | str, result: str) -> None:
+        """Log one filesystem operation in the requested diagnostic format."""
+        logger.info(
+            "Operation:\n%s\n\nTarget:\n%s\n\nResult:\n%s",
+            operation,
+            target,
+            result,
+        )
+
+    @staticmethod
+    def _log_operation_failure(
+        logger,
+        *,
+        operation: str,
+        target: Path | str,
+        exception: Exception,
+    ) -> None:
+        """Log one failed filesystem operation in the requested diagnostic format."""
+        logger.info(
+            "Operation:\n%s\n\nTarget:\n%s\n\nResult:\nFAILED\n\nException:\n%s\n%s",
+            operation,
+            target,
+            exception.__class__,
+            exception,
+        )
+
+    @staticmethod
+    def _log_destination_root(logger, destination_root: Path) -> None:
+        """Log the destination root once before the first file write."""
+        logger.info("Destination Root:\n%s", destination_root)
+
+    @staticmethod
+    def _log_first_file(
+        logger,
+        *,
+        remote_path: PurePosixPath,
+        local_path: Path,
+    ) -> None:
+        """Log the first file pair before the first download attempt."""
+        logger.info("Remote File:\n%s", remote_path)
+        logger.info("Local File:\n%s", local_path)
+
     def _connection_summary(self, profile: FolderBackupProfile) -> str:
         """Build a log-safe FTP connection summary."""
         password = self.log_service.mask_secret(profile.ftp_password)
@@ -165,83 +208,88 @@ class FtpTransport(BaseTransport):
         """Download one file and preserve the remote timestamp when available."""
         handle = None
         try:
-            logger.info("Creating parent:\n%s", local_path.parent)
             try:
                 local_path.parent.mkdir(parents=True, exist_ok=True)
             except Exception as exc:
-                logger.info("Result:\nFAILED")
                 self._raise_write_failure(
                     logger,
                     remote_path=remote_path,
                     local_path=local_path,
-                    operation="mkdir",
+                    operation="mkdir parent",
+                    target=local_path.parent,
                     exception=exc,
                 )
-            logger.info("Result:\nOK")
+            self._log_operation(logger, "mkdir parent", local_path.parent, "OK")
 
-            logger.info("Opening:\n%s", local_path)
             try:
                 handle = local_path.open("wb")
             except Exception as exc:
-                logger.info("Result:\nFAILED")
                 self._raise_write_failure(
                     logger,
                     remote_path=remote_path,
                     local_path=local_path,
-                    operation="open",
+                    operation="open destination file",
+                    target=local_path,
                     exception=exc,
                 )
-            logger.info("Result:\nOK")
+            self._log_operation(logger, "open destination file", local_path, "OK")
 
             def write_chunk(data: bytes) -> None:
-                logger.info("Writing:\n%s", local_path)
-                logger.info("Bytes:\n%s", len(data))
                 try:
                     handle.write(data)
                 except Exception as exc:
-                    logger.info("Result:\nFAILED")
                     self._raise_write_failure(
                         logger,
                         remote_path=remote_path,
                         local_path=local_path,
-                        operation="write",
+                        operation="write chunk",
+                        target=local_path,
                         exception=exc,
                     )
-                logger.info("Result:\nOK")
+                self._log_operation(logger, "write chunk", local_path, "OK")
 
             ftp.retrbinary(f"RETR {remote_path}", write_chunk)
 
-            logger.info("Flushing:\n%s", local_path)
             try:
                 handle.flush()
             except Exception as exc:
-                logger.info("Result:\nFAILED")
                 self._raise_write_failure(
                     logger,
                     remote_path=remote_path,
                     local_path=local_path,
                     operation="flush",
+                    target=local_path,
                     exception=exc,
                 )
-            logger.info("Result:\nOK")
+            self._log_operation(logger, "flush", local_path, "OK")
 
-            logger.info("Closing:\n%s", local_path)
             try:
                 handle.close()
             except Exception as exc:
-                logger.info("Result:\nFAILED")
                 self._raise_write_failure(
                     logger,
                     remote_path=remote_path,
                     local_path=local_path,
                     operation="close",
+                    target=local_path,
                     exception=exc,
                 )
             handle = None
-            logger.info("Result:\nOK")
+            self._log_operation(logger, "close", local_path, "OK")
 
             if remote_timestamp is not None:
-                os.utime(local_path, (remote_timestamp, remote_timestamp))
+                try:
+                    os.utime(local_path, (remote_timestamp, remote_timestamp))
+                except Exception as exc:
+                    self._raise_write_failure(
+                        logger,
+                        remote_path=remote_path,
+                        local_path=local_path,
+                        operation="os.utime",
+                        target=local_path,
+                        exception=exc,
+                    )
+                self._log_operation(logger, "os.utime", local_path, "OK")
         finally:
             if handle is not None:
                 try:
@@ -256,30 +304,25 @@ class FtpTransport(BaseTransport):
         remote_path: PurePosixPath,
         local_path: Path,
         operation: str,
+        target: Path | str,
         exception: Exception,
     ) -> None:
         """Raise a detailed FTP write failure for the first local-write error."""
+        self._log_operation_failure(
+            logger,
+            operation=operation,
+            target=target,
+            exception=exception,
+        )
         message = (
             "FTP Write Failure\n\n"
             f"Remote File:\n{remote_path}\n\n"
             f"Local File:\n{local_path}\n\n"
-            f"Parent:\n{local_path.parent}\n\n"
             f"Operation:\n{operation}\n\n"
+            f"Target:\n{target}\n\n"
             f"Exception:\n{exception.__class__}\n{exception}"
         )
-        logger.exception(message)
         raise RuntimeError(message) from exception
-
-    @staticmethod
-    def _log_download_target(
-        logger,
-        remote_path: PurePosixPath,
-        local_path: Path,
-    ) -> None:
-        """Log the exact local write target before downloading one remote file."""
-        logger.info("REMOTE FILE:\n%s", remote_path)
-        logger.info("LOCAL FILE:\n%s", local_path)
-        logger.info("PARENT:\n%s", local_path.parent)
 
     def _download_tree(
         self,
@@ -287,29 +330,44 @@ class FtpTransport(BaseTransport):
         remote_root: PurePosixPath,
         local_root: Path,
         logger,
+        first_file_logged: list[bool],
     ) -> int:
         """Recursively download new or updated files from the remote tree."""
         copied = 0
         for remote_path, facts in self._iter_remote_entries(ftp, remote_root):
             local_path = local_root / remote_path.relative_to(remote_root)
             if facts.get("type") == "dir":
-                local_path.mkdir(parents=True, exist_ok=True)
+                try:
+                    local_path.mkdir(parents=True, exist_ok=True)
+                except Exception as exc:
+                    self._raise_write_failure(
+                        logger,
+                        remote_path=remote_path,
+                        local_path=local_path,
+                        operation="mkdir parent",
+                        target=local_path,
+                        exception=exc,
+                    )
+                self._log_operation(logger, "mkdir parent", local_path, "OK")
                 copied += self._download_tree(
                     ftp,
                     remote_path,
                     local_path,
                     logger,
+                    first_file_logged,
                 )
                 continue
 
             remote_size = self._remote_size(ftp, remote_path, facts)
             remote_timestamp = self._remote_timestamp(ftp, remote_path, facts)
             if self._should_copy(local_path, remote_size, remote_timestamp):
-                self._log_download_target(
-                    logger,
-                    remote_path=remote_path,
-                    local_path=local_path,
-                )
+                if not first_file_logged[0]:
+                    self._log_first_file(
+                        logger,
+                        remote_path=remote_path,
+                        local_path=local_path,
+                    )
+                    first_file_logged[0] = True
                 self._download_file(ftp, remote_path, local_path, remote_timestamp, logger)
                 copied += 1
                 logger.info("Downloaded %s", remote_path)
@@ -336,7 +394,23 @@ class FtpTransport(BaseTransport):
                 )
 
             local_destination = Path(profile.destination).expanduser()
-            local_destination.mkdir(parents=True, exist_ok=True)
+            self._log_destination_root(logger, local_destination)
+            try:
+                local_destination.mkdir(parents=True, exist_ok=True)
+            except Exception as exc:
+                self._log_operation_failure(
+                    logger,
+                    operation="mkdir destination root",
+                    target=local_destination,
+                    exception=exc,
+                )
+                raise RuntimeError(
+                    "FTP Write Failure\n\n"
+                    f"Operation:\nmkdir destination root\n\n"
+                    f"Target:\n{local_destination}\n\n"
+                    f"Exception:\n{exc.__class__}\n{exc}"
+                ) from exc
+            self._log_operation(logger, "mkdir destination root", local_destination, "OK")
             remote_root = PurePosixPath(profile.ftp_remote_path or "/")
             connection_summary = self._connection_summary(profile)
             logger.info("Starting FTP download: %s (passive=%s)", connection_summary, profile.ftp_passive)
@@ -350,6 +424,7 @@ class FtpTransport(BaseTransport):
                     remote_root,
                     local_destination,
                     logger,
+                    [False],
                 )
             finally:
                 try:

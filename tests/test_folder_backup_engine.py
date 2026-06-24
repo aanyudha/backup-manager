@@ -229,6 +229,7 @@ def test_ftp_run_uses_ftp_remote_path_not_source(tmp_path: Path, monkeypatch: py
         remote_root,
         local_root,
         logger,
+        *args,
     ):
         captured["remote_root"] = remote_root
         captured["local_root"] = local_root

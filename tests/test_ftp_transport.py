@@ -80,7 +80,7 @@ def test_ftp_password_is_masked_in_logs(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(
         transport,
         "_download_tree",
-        lambda ftp, remote, local, logger, **kwargs: 0,
+        lambda ftp, remote, local, logger, *args, **kwargs: 0,
     )
 
     result = transport.run(profile)
@@ -91,7 +91,7 @@ def test_ftp_password_is_masked_in_logs(tmp_path: Path, monkeypatch: pytest.Monk
     assert "********" in log_text
 
 
-def test_ftp_transport_logs_target_details_before_each_write(
+def test_ftp_transport_logs_destination_and_first_file_details(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -121,15 +121,18 @@ def test_ftp_transport_logs_target_details_before_each_write(
         log_text = handle.read()
 
     expected_local = Path(profile.destination) / "folder" / "file.txt"
-    assert "REMOTE FILE:\n/exports/folder/file.txt" in log_text
-    assert f"LOCAL FILE:\n{expected_local}" in log_text
-    assert f"PARENT:\n{expected_local.parent}" in log_text
-    assert f"Creating parent:\n{expected_local.parent}" in log_text
-    assert f"Opening:\n{expected_local}" in log_text
-    assert f"Writing:\n{expected_local}" in log_text
-    assert "Bytes:\n7" in log_text
-    assert f"Flushing:\n{expected_local}" in log_text
-    assert f"Closing:\n{expected_local}" in log_text
+    expected_parent = expected_local.parent
+    expected_destination = Path(profile.destination)
+
+    assert f"Destination Root:\n{expected_destination}" in log_text
+    assert "Remote File:\n/exports/folder/file.txt" in log_text
+    assert f"Local File:\n{expected_local}" in log_text
+    assert f"Operation:\nmkdir destination root\n\nTarget:\n{expected_destination}\n\nResult:\nOK" in log_text
+    assert f"Operation:\nmkdir parent\n\nTarget:\n{expected_parent}\n\nResult:\nOK" in log_text
+    assert f"Operation:\nopen destination file\n\nTarget:\n{expected_local}\n\nResult:\nOK" in log_text
+    assert f"Operation:\nwrite chunk\n\nTarget:\n{expected_local}\n\nResult:\nOK" in log_text
+    assert f"Operation:\nflush\n\nTarget:\n{expected_local}\n\nResult:\nOK" in log_text
+    assert f"Operation:\nclose\n\nTarget:\n{expected_local}\n\nResult:\nOK" in log_text
 
 
 def test_ftp_transport_surfaces_local_write_failure_details(
@@ -169,11 +172,11 @@ def test_ftp_transport_surfaces_local_write_failure_details(
         log_text = handle.read()
 
     expected_local = Path(profile.destination) / "file.txt"
-    assert "FTP Write Failure" in log_text
     assert "Remote File:\n/exports/file.txt" in log_text
     assert f"Local File:\n{expected_local}" in log_text
-    assert f"Parent:\n{expected_local.parent}" in log_text
-    assert "Operation:\nopen" in log_text
+    assert f"Target:\n{expected_local}" in log_text
+    assert "Operation:\nopen destination file" in log_text
+    assert f"Operation:\nopen destination file\n\nTarget:\n{expected_local}\n\nResult:\nFAILED" in log_text
     assert "Exception:\n<class 'PermissionError'>\nsimulated local write failure" in log_text
 
 
@@ -226,11 +229,47 @@ def test_ftp_transport_stops_after_first_write_failure(
     monkeypatch.setattr(transport, "_remote_timestamp", lambda ftp, remote_path, facts: None)
     monkeypatch.setattr("app.transports.ftp_transport.Path.open", fake_open)
 
-    with pytest.raises(RuntimeError, match="Operation:\nwrite"):
+    with pytest.raises(RuntimeError, match="Operation:\nwrite chunk"):
         transport.run(profile)
 
     assert retrbinary_commands == ["RETR /exports/first.txt"]
     assert opened_files == ["first.txt"]
+
+
+def test_ftp_transport_logs_first_file_only_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = FtpTransport(LogService(tmp_path / "logs"))
+    profile = build_ftp_profile(tmp_path)
+
+    class DummyFtp:
+        def retrbinary(self, command: str, callback) -> None:
+            callback(b"payload")
+
+        def quit(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_iter_remote_entries",
+        lambda ftp, remote_root: [
+            (PurePosixPath("/exports/first.txt"), {"type": "file"}),
+            (PurePosixPath("/exports/second.txt"), {"type": "file"}),
+        ],
+    )
+    monkeypatch.setattr(transport, "_remote_size", lambda ftp, remote_path, facts: None)
+    monkeypatch.setattr(transport, "_remote_timestamp", lambda ftp, remote_path, facts: None)
+
+    result = transport.run(profile)
+
+    assert result.log_file is not None
+    log_text = Path(result.log_file).read_text(encoding="utf-8")
+
+    assert log_text.count("Remote File:\n") == 1
+    assert log_text.count("Local File:\n") == 1
+    assert "Remote File:\n/exports/first.txt" in log_text
 
 
 def test_folder_backup_engine_routes_ftp_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
