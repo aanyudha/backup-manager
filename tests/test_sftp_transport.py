@@ -10,6 +10,7 @@ import pytest
 
 from app.models.profile import FolderBackupProfile
 from app.services.log_service import LogService
+from app.services.path_sanitizer_service import FILENAME_MAP_NAME
 from app.services.platform_service import PlatformService
 from app.services.staging_service import RobocopyResult
 from app.transports.sftp_transport import SftpTransport
@@ -160,6 +161,41 @@ def test_sftp_transport_creates_file_parent_only_when_missing(
     assert result.success is True
     assert expected_parent.exists()
     assert mkdir_targets.count(expected_parent) == 1
+
+
+def test_sftp_transport_uses_sanitized_path_on_windows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_service = PlatformService()
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    transport = SftpTransport(LogService(tmp_path / "logs"), platform_service=platform_service)
+    profile = build_sftp_profile(tmp_path)
+    client = DummySftpClient(
+        {
+            "/exports": [
+                SimpleNamespace(
+                    filename="57915_535352720 |.pdf",
+                    st_mode=stat.S_IFREG,
+                    st_mtime=1,
+                    st_size=7,
+                )
+            ]
+        }
+    )
+
+    monkeypatch.setattr(transport, "_connect", lambda current: client)
+
+    result = transport.run(profile)
+
+    sanitized_file = Path(profile.destination) / "57915_535352720 _.pdf"
+    filename_map = Path(profile.destination) / FILENAME_MAP_NAME
+
+    assert result.success is True
+    assert client.get_calls == [("/exports/57915_535352720 |.pdf", str(sanitized_file))]
+    assert sanitized_file.exists()
+    assert filename_map.exists()
+    assert "filename sanitization for Windows compatibility" in result.message
 
 
 def test_sftp_transport_uses_local_staging_for_windows_unc_destination(

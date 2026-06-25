@@ -131,6 +131,8 @@ python app.py
    - Use SFTP for encrypted transfer.
    - Remote FTP destination upload is not supported.
    - Remote FTP sources copy to local or network-mounted destination folders only.
+   - On Windows destinations, Heisenberg sanitizes remote filenames that contain Windows-invalid characters instead of failing the backup.
+   - When any remote FTP path is sanitized, Heisenberg writes `.heisenberg_filename_map.json` in the active destination or staging root.
    - Set `FTP Source Folder` to the remote source folder.
    - Use `Browse FTP Folder` to pick the remote source folder.
    - Use `copy_new_changed` or `sync_without_delete`.
@@ -138,6 +140,8 @@ python app.py
 23. For SFTP in this MVP:
    - Remote SFTP destination upload is not supported.
    - Remote SFTP sources copy to local or network-mounted destination folders only.
+   - On Windows destinations, Heisenberg sanitizes remote filenames that contain Windows-invalid characters instead of failing the backup.
+   - When any remote SFTP path is sanitized, Heisenberg writes `.heisenberg_filename_map.json` in the active destination or staging root.
    - Set `SFTP Source Folder` to the remote source folder.
    - Use `Browse SFTP Folder` to pick the remote source folder.
 24. Prefer SFTP over FTP when the server supports it.

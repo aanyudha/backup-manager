@@ -9,6 +9,7 @@ __all__ = [
     "ExternalSchedulerService",
     "LogService",
     "MySQLService",
+    "PathSanitizerService",
     "PlatformService",
     "RemoteBrowserService",
     "RestoreService",
@@ -41,6 +42,10 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from app.services.mysql_service import MySQLService
 
         return MySQLService
+    if name == "PathSanitizerService":
+        from app.services.path_sanitizer_service import PathSanitizerService
+
+        return PathSanitizerService
     if name == "PlatformService":
         from app.services.platform_service import PlatformService
 

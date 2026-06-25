@@ -12,6 +12,7 @@ from app.engines.folder_backup_engine import FolderBackupEngine
 from app.models.profile import FolderBackupProfile, parse_profile
 from app.models.result import BackupResult
 from app.services.log_service import LogService
+from app.services.path_sanitizer_service import FILENAME_MAP_NAME
 from app.services.platform_service import PlatformService
 from app.services.staging_service import RobocopyResult
 from app.transports.ftp_transport import FtpTransport
@@ -502,6 +503,77 @@ def test_ftp_transport_logs_first_file_only_once(
     assert log_text.count("Remote File:\n") == 1
     assert log_text.count("Local File:\n") == 1
     assert "Remote File:\n/exports/first.txt" in log_text
+
+
+def test_ftp_transport_uses_sanitized_path_on_windows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_service = PlatformService()
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    transport = FtpTransport(LogService(tmp_path / "logs"), platform_service=platform_service)
+    profile = build_ftp_profile(tmp_path)
+
+    class DummyFtp:
+        def retrbinary(self, command: str, callback) -> None:
+            callback(b"payload")
+
+        def quit(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_iter_remote_entries",
+        lambda ftp, remote_root: [(PurePosixPath("/exports/pdf/57915_535352720 |.pdf"), {"type": "file"})],
+    )
+    monkeypatch.setattr(transport, "_remote_size", lambda ftp, remote_path, facts: None)
+    monkeypatch.setattr(transport, "_remote_timestamp", lambda ftp, remote_path, facts: None)
+
+    result = transport.run(profile)
+
+    sanitized_file = Path(profile.destination) / "pdf" / "57915_535352720 _.pdf"
+    filename_map = Path(profile.destination) / FILENAME_MAP_NAME
+
+    assert result.success is True
+    assert sanitized_file.exists()
+    assert "filename sanitization for Windows compatibility" in result.message
+    assert filename_map.exists()
+    assert '"remote": "pdf/57915_535352720 |.pdf"' in filename_map.read_text(encoding="utf-8")
+    log_text = Path(result.log_file or "").read_text(encoding="utf-8")
+    assert "Remote filename sanitized:\nOriginal: pdf/57915_535352720 |.pdf\nLocal: pdf/57915_535352720 _.pdf" in log_text
+
+
+def test_ftp_transport_does_not_write_filename_map_when_no_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_service = PlatformService()
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    transport = FtpTransport(LogService(tmp_path / "logs"), platform_service=platform_service)
+    profile = build_ftp_profile(tmp_path)
+
+    class DummyFtp:
+        def retrbinary(self, command: str, callback) -> None:
+            callback(b"payload")
+
+        def quit(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport, "_connect", lambda current: DummyFtp())
+    monkeypatch.setattr(
+        transport,
+        "_iter_remote_entries",
+        lambda ftp, remote_root: [(PurePosixPath("/exports/pdf/file.pdf"), {"type": "file"})],
+    )
+    monkeypatch.setattr(transport, "_remote_size", lambda ftp, remote_path, facts: None)
+    monkeypatch.setattr(transport, "_remote_timestamp", lambda ftp, remote_path, facts: None)
+
+    result = transport.run(profile)
+
+    assert result.success is True
+    assert not (Path(profile.destination) / FILENAME_MAP_NAME).exists()
+    assert "filename sanitization for Windows compatibility" not in result.message
 
 
 def test_ftp_transport_uses_local_staging_for_windows_unc_destination(

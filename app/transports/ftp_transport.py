@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ftplib
 import os
+import posixpath
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from app.models.profile import FolderBackupProfile
+from app.services.path_sanitizer_service import PathSanitizerService
 from app.services.path_validation_service import PathValidationService
 from app.services.platform_service import PlatformService
 from app.services.staging_service import StagingService
@@ -30,6 +32,9 @@ class FtpTransport(BaseTransport):
             platform_service=self.platform_service,
             log_service=log_service,
         )
+        self._current_remote_root: PurePosixPath | None = None
+        self._current_path_sanitizer: PathSanitizerService | None = None
+        self._logged_sanitized_paths: set[str] = set()
 
     @staticmethod
     def _close_logger_handlers(logger) -> None:
@@ -115,6 +120,59 @@ class FtpTransport(BaseTransport):
     def _build_staging_failure_message(message: str, staging_folder: Path) -> str:
         """Append the kept staging folder path to a failure message."""
         return f"{message}\n\nStaging Folder Kept:\n{staging_folder}"
+
+    @staticmethod
+    def _log_sanitized_path(logger, *, original_relative_path: str, local_relative_path: str) -> None:
+        """Log when a remote path must change for the local filesystem."""
+        logger.warning(
+            "Remote filename sanitized:\nOriginal: %s\nLocal: %s",
+            original_relative_path,
+            local_relative_path,
+        )
+
+    @staticmethod
+    def _raise_mapping_write_failure(logger, *, target: Path, exception: Exception) -> None:
+        """Raise a detailed error when the filename map cannot be written."""
+        logger.info(
+            "Operation:\nwrite filename map\n\nTarget:\n%s\n\nResult:\nFAILED\n\nException:\n%s\n%s",
+            target,
+            exception.__class__,
+            exception,
+        )
+        raise RuntimeError(
+            "FTP Write Failure\n\n"
+            "Operation:\nwrite filename map\n\n"
+            f"Target:\n{target}\n\n"
+            f"Exception:\n{exception.__class__}\n{exception}"
+        ) from exception
+
+    def _resolve_local_path(
+        self,
+        remote_path: PurePosixPath,
+        *,
+        record_mapping: bool,
+        logger,
+    ) -> Path:
+        """Map a remote path into a collision-safe local path under the active root."""
+        if self._current_remote_root is None or self._current_path_sanitizer is None:
+            raise RuntimeError("FTP path sanitizer state is not initialized.")
+
+        remote_relative_path = posixpath.relpath(remote_path.as_posix(), self._current_remote_root.as_posix())
+        original_relative_path, local_relative_path, changed = self._current_path_sanitizer.resolve_relative_path(
+            remote_relative_path,
+            record_mapping=record_mapping,
+        )
+        if changed and original_relative_path not in self._logged_sanitized_paths:
+            self._log_sanitized_path(
+                logger,
+                original_relative_path=original_relative_path,
+                local_relative_path=local_relative_path,
+            )
+            self._logged_sanitized_paths.add(original_relative_path)
+        return self._current_path_sanitizer.build_safe_local_path(
+            remote_relative_path,
+            record_mapping=record_mapping,
+        )
 
     def _connect(self, profile: FolderBackupProfile) -> ftplib.FTP:
         """Create and authenticate an FTP client."""
@@ -359,7 +417,7 @@ class FtpTransport(BaseTransport):
         """Recursively download new or updated files from the remote tree."""
         copied = 0
         for remote_path, facts in self._iter_remote_entries(ftp, remote_root):
-            local_path = local_root / remote_path.relative_to(remote_root)
+            local_path = self._resolve_local_path(remote_path, record_mapping=False, logger=logger)
             if facts.get("type") == "dir":
                 try:
                     self.ensure_local_directory(local_path)
@@ -391,6 +449,7 @@ class FtpTransport(BaseTransport):
                         local_path=local_path,
                     )
                     first_file_logged[0] = True
+                local_path = self._resolve_local_path(remote_path, record_mapping=True, logger=logger)
                 self._download_file(ftp, remote_path, local_path, remote_timestamp, logger)
                 copied += 1
                 logger.info("Downloaded %s", remote_path)
@@ -454,6 +513,12 @@ class FtpTransport(BaseTransport):
                     logger.info("Staging Folder Kept:\n%s", staging_folder)
                 raise RuntimeError(message) from exc
             remote_root = PurePosixPath(profile.ftp_remote_path or "/")
+            self._current_remote_root = remote_root
+            self._current_path_sanitizer = PathSanitizerService(
+                download_root,
+                platform="windows" if self.platform_service.is_windows() else self.platform_service.system_name(),
+            )
+            self._logged_sanitized_paths = set()
             connection_summary = self._connection_summary(profile)
             logger.info("Starting FTP download: %s (passive=%s)", connection_summary, profile.ftp_passive)
             if progress:
@@ -474,6 +539,17 @@ class FtpTransport(BaseTransport):
                         ftp.quit()
                     except ftplib.all_errors:
                         ftp.close()
+
+                try:
+                    filename_map_path = self._current_path_sanitizer.write_filename_map(download_root)
+                except Exception as exc:
+                    self._raise_mapping_write_failure(
+                        logger,
+                        target=download_root / ".heisenberg_filename_map.json",
+                        exception=exc,
+                    )
+                if filename_map_path is not None:
+                    logger.info("Filename Map:\n%s", filename_map_path)
 
                 if staging_folder is not None:
                     copy_result = self.staging_service.copy_staging_to_destination_with_robocopy(
@@ -508,6 +584,10 @@ class FtpTransport(BaseTransport):
                 raise
 
             message = f"Downloaded {copied} file(s) from FTP."
+            if self._current_path_sanitizer is not None and self._current_path_sanitizer.has_sanitized_paths:
+                warning_message = "Download completed with filename sanitization for Windows compatibility."
+                logger.warning(warning_message)
+                message = f"{message} {warning_message}"
             logger.info(message)
             logger.info("Final Status:\nSUCCESS")
             if progress:
@@ -521,4 +601,7 @@ class FtpTransport(BaseTransport):
                 output_file=str(destination_root),
             )
         finally:
+            self._current_remote_root = None
+            self._current_path_sanitizer = None
+            self._logged_sanitized_paths = set()
             self._close_logger_handlers(logger)

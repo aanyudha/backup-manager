@@ -335,6 +335,8 @@ Folder backup outputs are directories. In v0.2.0, SHA256 and retention are appli
 - Use SFTP for encrypted transfer.
 - FTP support in this MVP is remote source to local or network-mounted destination only.
 - FTP downloads new or changed files recursively and preserves the remote directory structure.
+- When remote FTP names contain characters that are invalid on Windows local filesystems, Heisenberg sanitizes the local filename instead of failing the download.
+- When any FTP filename is sanitized, Heisenberg writes `.heisenberg_filename_map.json` in the active destination or staging root so you can map remote names to local names.
 - `mirror_with_delete` is intentionally unsupported for FTP in the MVP.
 - Browse remote FTP source folders with `Browse FTP Folder`.
 - Local source selection uses `Source Folder`.
@@ -353,6 +355,8 @@ Folder backup outputs are directories. In v0.2.0, SHA256 and retention are appli
 
 - MVP support covers remote source to local or network-mounted destination downloads.
 - New and changed files are downloaded recursively.
+- When remote SFTP names contain characters that are invalid on Windows local filesystems, Heisenberg sanitizes the local filename instead of failing the download.
+- When any SFTP filename is sanitized, Heisenberg writes `.heisenberg_filename_map.json` in the active destination or staging root so you can map remote names to local names.
 - `mirror_with_delete` is intentionally unsupported for SFTP in the MVP.
 - Browse remote SFTP source folders with `Browse SFTP Folder`.
 - Local source selection uses `Source Folder`.
