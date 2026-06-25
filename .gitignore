@@ -7,6 +7,7 @@ build/
 *.spec
 logs/
 exports/
+temp/
 config/profiles.json
 config/settings.json
 config/restore_history.json
