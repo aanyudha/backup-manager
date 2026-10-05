@@ -164,6 +164,12 @@ class MySQLProfilesPage(QWidget):
         database_form = QFormLayout()
         database_form.addRow("Database Mode", self.database_mode_combo)
         database_layout.addLayout(database_form)
+        database_help_label = QLabel(
+            "In all mode, database selection can be empty. "
+            "Loading the database list is optional; all databases will be backed up."
+        )
+        database_help_label.setWordWrap(True)
+        database_layout.addWidget(database_help_label)
         database_layout.addWidget(self.load_databases_button)
         database_layout.addWidget(self.database_list)
 

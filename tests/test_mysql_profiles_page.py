@@ -118,6 +118,22 @@ def test_loading_profile_restores_single_database_selection() -> None:
     app.quit()
 
 
+def test_all_mode_can_save_with_empty_database_list() -> None:
+    app = QApplication.instance() or QApplication([])
+    page = MySQLProfilesPage(StubMySQLService())
+    profile = build_profile(database_mode="all", databases=[])
+    page.set_profiles([profile])
+
+    assert page._collect_form_data().databases == []
+    page._load_databases()
+    collected = page._collect_form_data()
+    assert collected.database_mode == "all"
+    assert collected.databases == []
+
+    page.close()
+    app.quit()
+
+
 def test_collect_form_data_persists_network_destination_type() -> None:
     app = QApplication.instance() or QApplication([])
     page = MySQLProfilesPage(StubMySQLService())

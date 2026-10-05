@@ -16,6 +16,7 @@ from app.models.profile import MySQLBackupProfile
 from app.models.result import BackupResult
 from app.services.compression_service import CompressionService, CompressionServiceError
 from app.services.log_service import LogService
+from app.services.mysql_service import connect_mysql
 from app.services.network_error_service import is_network_transient_error
 from app.services.path_validation_service import PathValidationService
 from app.services.platform_service import PlatformService
@@ -136,7 +137,7 @@ class MySQLBackupEngine(BaseBackupEngine):
         """Best-effort lookup of the connected MySQL server version."""
         connection = None
         try:
-            connection = pymysql.connect(
+            connection = connect_mysql(
                 host=profile.host,
                 port=profile.port,
                 user=profile.username,

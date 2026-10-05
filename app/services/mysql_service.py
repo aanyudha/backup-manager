@@ -9,6 +9,16 @@ import pymysql
 SYSTEM_DATABASES = {"information_schema", "mysql", "performance_schema", "sys"}
 
 
+def connect_mysql(**kwargs):
+    """Prefer full Unicode, falling back only for unsupported server charsets."""
+    try:
+        return pymysql.connect(charset="utf8mb4", **kwargs)
+    except pymysql.MySQLError as exc:
+        if not exc.args or exc.args[0] != 1115:
+            raise
+        return pymysql.connect(charset="utf8", **kwargs)
+
+
 class MySQLService:
     """Wrap PyMySQL calls for the UI layer."""
 
@@ -21,7 +31,7 @@ class MySQLService:
         password: str,
     ):
         """Open a short-lived MySQL connection with shared defaults."""
-        return pymysql.connect(
+        return connect_mysql(
             host=host,
             port=port,
             user=username,
