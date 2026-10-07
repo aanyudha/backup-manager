@@ -171,6 +171,49 @@ def test_folder_test_destination_calls_validation_only(monkeypatch) -> None:
     app.quit()
 
 
+def test_failed_write_probe_is_diagnostic_and_does_not_block_robocopy(monkeypatch) -> None:
+    """A failed Test Destination probe must stay a diagnostic for robocopy profiles."""
+    app = QApplication.instance() or QApplication([])
+    page = FolderProfilesPage(PlatformService(), RemoteBrowserService())
+    page.engine_combo.setCurrentText("robocopy")
+    page.source_edit.setText(r"D:\CCTV")
+    page.destination_type_combo.setCurrentIndex(1)
+    page.destination_edit.setText(r"Z:\cctv")
+    dialogs: list[str] = []
+    warnings: list[str] = []
+
+    monkeypatch.setattr(
+        page.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (
+            False,
+            "Destination validation failed:\nException: OSError: [WinError 59]",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.ui.folder_profiles_page.QMessageBox.information",
+        lambda *args: dialogs.append(str(args[-1])),
+    )
+    monkeypatch.setattr(
+        "app.ui.folder_profiles_page.QMessageBox.warning",
+        lambda *args: warnings.append(str(args[-1])),
+    )
+
+    page._test_destination()
+
+    status = page.status_output.toPlainText()
+    assert "Destination validation failed:" in status
+    assert "does not block Run Backup" in status
+    assert "robocopy engine creates the destination folder itself" in status
+    assert warnings and "only a diagnostic" in warnings[0]
+    assert "does not block Run Backup" in warnings[0]
+    assert dialogs == []
+    assert page.resolved_engine_value.text() == "robocopy"
+
+    page.close()
+    app.quit()
+
+
 def test_network_destination_section_visibility_tracks_destination_type() -> None:
     app = QApplication.instance() or QApplication([])
     page = FolderProfilesPage(PlatformService(), RemoteBrowserService())

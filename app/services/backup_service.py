@@ -140,6 +140,11 @@ class BackupService:
         """Compute and persist verification metadata for a completed file backup."""
         if not result.success or not result.output_file:
             return []
+        if self._robocopy_owns_destination(profile):
+            # Robocopy's exit code is the authoritative verification for folder copies.
+            # Probing a mapped-drive destination from Python can raise WinError 59 even
+            # after robocopy copied everything successfully.
+            return []
 
         warnings: list[str] = []
         output_path = Path(result.output_file)
@@ -188,6 +193,18 @@ class BackupService:
         if progress:
             progress(detail)
         return warnings
+
+    def _robocopy_owns_destination(self, profile: Profile) -> bool:
+        """Return whether a folder profile copies with the robocopy engine."""
+        if not isinstance(profile, FolderBackupProfile):
+            return False
+        resolver = getattr(self.folder_engine, "resolve_engine", None)
+        if resolver is None:
+            return False
+        try:
+            return resolver(profile) == "robocopy"
+        except Exception:
+            return False
 
     def _build_warning_message(self, result: BackupResult, warnings: list[str]) -> str:
         """Merge non-fatal post-backup warnings into the user-facing result message."""

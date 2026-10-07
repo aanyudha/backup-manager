@@ -12,6 +12,7 @@ from app.engines.folder_backup_engine import FolderBackupEngine
 from app.models.profile import FolderBackupProfile
 from app.models.result import BackupResult
 from app.services.log_service import LogService
+from app.services.path_validation_service import PathValidationService
 from app.services.platform_service import PlatformService
 
 
@@ -472,3 +473,218 @@ def test_local_source_unc_destination_does_not_use_remote_staging_transports(
     result = engine.run(profile)
 
     assert result.success is True
+
+
+def test_robocopy_run_skips_python_destination_probes_before_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robocopy profiles must not run ensure_destination_writable or mkdir."""
+    engine, _ = build_engine(tmp_path)
+    source_dir = tmp_path / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    profile = build_profile(
+        tmp_path,
+        name="cctv",
+        source=str(source_dir),
+        destination=r"Z:\cctv",
+        destination_type="network",
+        engine="robocopy",
+    )
+    preflight_calls: list[tuple[str, str]] = []
+    transport_calls: list[str] = []
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Python destination write probe must not run for robocopy.")
+
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        forbidden,
+    )
+    monkeypatch.setattr(
+        PathValidationService,
+        "ensure_destination_writable",
+        staticmethod(forbidden),
+    )
+    monkeypatch.setattr(
+        PathValidationService,
+        "validate_robocopy_destination",
+        classmethod(
+            lambda cls, path, destination_type: (
+                preflight_calls.append((path, destination_type)) or True,
+                "preflight ok",
+            )
+        ),
+    )
+    monkeypatch.setattr(Path, "mkdir", forbidden)
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.RobocopyTransport.run",
+        lambda self, current_profile, progress=None: (
+            transport_calls.append(current_profile.destination)
+            or build_result(current_profile, "Robocopy exit code: 1\nBackup completed successfully.")
+        ),
+    )
+
+    result = engine.run(profile)
+
+    assert result.success is True
+    assert preflight_calls == [(r"Z:\cctv", "network")]
+    assert transport_calls == [r"Z:\cctv"]
+
+
+def test_robocopy_run_reports_status_lines_without_winerror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful robocopy run must not surface generic WinError 59 noise."""
+    engine, platform_service = build_engine(tmp_path)
+    source_dir = tmp_path / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    profile = build_profile(
+        tmp_path,
+        name="cctv",
+        source=str(source_dir),
+        destination=r"Z:\cctv",
+        destination_type="network",
+        engine="auto",
+    )
+    progress_lines: list[str] = []
+
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    monkeypatch.setattr(platform_service, "command_exists", lambda command: command == "robocopy")
+    monkeypatch.setattr(
+        PathValidationService,
+        "_safe_is_dir",
+        staticmethod(lambda path: True),
+    )
+    monkeypatch.setattr(
+        "app.transports.robocopy_transport.subprocess.run",
+        lambda command, capture_output=True, text=True, check=False: SimpleNamespace(
+            returncode=1,
+            stdout="1 dir copied",
+            stderr="",
+        ),
+    )
+
+    result = engine.run(profile, progress_lines.append)
+
+    assert result.success is True
+    assert progress_lines[0] == "Using robocopy engine for cctv."
+    assert progress_lines[1] == f"Source: {profile.source}"
+    assert progress_lines[2] == r"Destination: Z:\cctv"
+    assert progress_lines[3] == "Robocopy exit code: 1"
+    assert progress_lines[4] == "Backup completed successfully."
+    assert not any("WinError" in line for line in progress_lines)
+    assert "WinError" not in result.message
+
+
+def test_local_copy_engine_keeps_strict_destination_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """local_copy must still fail when the destination is not writable."""
+    engine, _ = build_engine(tmp_path)
+    source_dir = tmp_path / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    profile = build_profile(
+        tmp_path,
+        source=str(source_dir),
+        destination=str(tmp_path / "destination"),
+        engine="local_copy",
+    )
+    transport_calls: list[str] = []
+
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (False, "Destination validation failed: disk full"),
+    )
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_robocopy_destination",
+        lambda path, destination_type: (_ for _ in ()).throw(
+            AssertionError("robocopy preflight must not run for local_copy")
+        ),
+    )
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.LocalCopyTransport.run",
+        lambda self, current_profile, progress=None: (
+            transport_calls.append(current_profile.destination)
+            or build_result(current_profile, "Copied 0 file(s)")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Destination validation failed: disk full"):
+        engine.run(profile)
+
+    assert transport_calls == []
+
+
+@pytest.mark.parametrize("source_type", ["ftp", "sftp"])
+def test_remote_source_engines_keep_full_destination_validation_and_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_type: str,
+) -> None:
+    """FTP/SFTP profiles keep UNC staging plus full destination validation."""
+    engine, platform_service = build_engine(tmp_path)
+    remote_fields = (
+        {
+            "ftp_host": "ftp.example.com",
+            "ftp_username": "backup",
+            "ftp_password": "secret",
+            "ftp_remote_path": "/exports",
+        }
+        if source_type == "ftp"
+        else {
+            "sftp_host": "sftp.example.com",
+            "sftp_username": "backup",
+            "sftp_password": "secret",
+            "sftp_remote_path": "/incoming",
+        }
+    )
+    profile = build_profile(
+        tmp_path,
+        source="",
+        source_type=source_type,
+        destination=r"\\server\share\backup",
+        destination_type="network",
+        **remote_fields,
+    )
+    call_order: list[str] = []
+    transport = "FtpTransport" if source_type == "ftp" else "SftpTransport"
+
+    monkeypatch.setattr(platform_service, "is_windows", lambda: True)
+    monkeypatch.setattr(platform_service, "command_exists", lambda command: command == "robocopy")
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_destination_path",
+        lambda path, destination_type: (call_order.append("validate") or True, "ok"),
+    )
+    monkeypatch.setattr(
+        engine.path_validation_service,
+        "validate_robocopy_destination",
+        lambda path, destination_type: (_ for _ in ()).throw(
+            AssertionError("robocopy preflight must not run for remote-source profiles")
+        ),
+    )
+    monkeypatch.setattr(
+        f"app.engines.folder_backup_engine.{transport}.run",
+        lambda self, current_profile, progress=None: (
+            call_order.append("staging-transport")
+            or build_result(current_profile, "staged and copied")
+        ),
+    )
+    monkeypatch.setattr(
+        "app.engines.folder_backup_engine.RobocopyTransport.run",
+        lambda self, current_profile, progress=None: (_ for _ in ()).throw(
+            AssertionError("robocopy transport must not replace remote-source staging")
+        ),
+    )
+
+    result = engine.run(profile)
+
+    assert result.success is True
+    assert call_order == ["validate", "staging-transport"]
+

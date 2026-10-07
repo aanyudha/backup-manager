@@ -118,7 +118,15 @@ class FolderBackupEngine(BaseBackupEngine):
     def _validate_profile(self, profile: FolderBackupProfile, engine: str) -> None:
         """Validate profile path assumptions before execution."""
         destination_is_rsync_remote = engine == "rsync" and self._destination_uses_rsync_syntax(profile)
-        if not destination_is_rsync_remote:
+        if engine == "robocopy":
+            # Robocopy owns destination creation: cheap preflight only, no write probe.
+            destination_ok, destination_message = self.path_validation_service.validate_robocopy_destination(
+                profile.destination,
+                profile.destination_type,
+            )
+            if not destination_ok:
+                raise RuntimeError(destination_message)
+        elif not destination_is_rsync_remote:
             destination_ok, destination_message = self.path_validation_service.validate_destination_path(
                 profile.destination,
                 profile.destination_type,
@@ -136,8 +144,15 @@ class FolderBackupEngine(BaseBackupEngine):
             raise RuntimeError("FTP/SFTP engine requires remote source type.")
 
         if engine in {"local_copy", "robocopy"}:
-            source = Path(profile.source).expanduser()
-            if not source.exists():
+            source_text = profile.source.strip()
+            if not source_text:
+                raise FileNotFoundError("Source folder is required.")
+            source = Path(source_text).expanduser()
+            try:
+                source_exists = source.exists()
+            except OSError as exc:
+                raise FileNotFoundError(f"Source folder not accessible: {source} ({exc})") from exc
+            if not source_exists:
                 raise FileNotFoundError(f"Source folder not found: {source}")
         elif engine == "rsync":
             if not self._looks_like_rsync_remote(profile.source) and not Path(profile.source).expanduser().exists():

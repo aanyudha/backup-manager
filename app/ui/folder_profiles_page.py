@@ -640,9 +640,26 @@ class FolderProfilesPage(QWidget):
         if disconnect_warning:
             message = f"{message}\n{disconnect_warning}"
         if valid:
+            self.append_status(
+                "Diagnostic write probe passed. Run Backup performs its own destination "
+                "checks for the selected engine."
+            )
             QMessageBox.information(self, "Test Destination", message)
             return
-        QMessageBox.warning(self, "Test Destination", message)
+        self._refresh_resolved_engine()
+        if self.resolved_engine_value.text() == "robocopy":
+            note = (
+                "Write probe failed, but this button is only a diagnostic: it does not block "
+                "Run Backup. The robocopy engine creates the destination folder itself, and no "
+                "Python write probe runs before robocopy during the backup."
+            )
+        else:
+            note = (
+                "Write probe failed. This button is only a diagnostic; Run Backup performs its "
+                "own destination validation for the selected engine."
+            )
+        self.append_status(note)
+        QMessageBox.warning(self, "Test Destination", f"{message}\n\n{note}")
 
     def _browse_source_folder(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.source_edit.text() or "")

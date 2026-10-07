@@ -126,3 +126,98 @@ def test_network_destination_rejects_forward_slash_unc_path() -> None:
     assert valid is False
     assert "Invalid Windows network path '//server/share'" in message
     assert r"Use a UNC path like '\\server\share\folder'." in message
+
+
+def test_get_windows_drive_root_returns_drive_root() -> None:
+    assert PathValidationService.get_windows_drive_root(r"Z:\cctv") == "Z:\\"
+    assert PathValidationService.get_windows_drive_root(r"Z:\backup\folder") == "Z:\\"
+    assert PathValidationService.get_windows_drive_root("Z:/cctv") == "Z:\\"
+    assert PathValidationService.get_windows_drive_root(r"\\server\share\folder") == ""
+    assert PathValidationService.get_windows_drive_root("/mnt/data") == ""
+    assert PathValidationService.get_windows_drive_root("") == ""
+
+
+def test_robocopy_destination_preflight_requires_input_and_valid_syntax() -> None:
+    valid, message = PathValidationService.validate_robocopy_destination("", "network")
+
+    assert valid is False
+    assert message == "Destination folder is required."
+
+    valid, message = PathValidationService.validate_robocopy_destination("//server/share/folder", "network")
+
+    assert valid is False
+    assert "Invalid Windows network path '//server/share'" in message
+
+    valid, message = PathValidationService.validate_robocopy_destination(r"Z:\cctv", "mysql")
+
+    assert valid is False
+    assert message == "Unsupported destination type: mysql"
+
+
+def test_robocopy_destination_preflight_skips_mkdir_and_write_probe(
+    monkeypatch,
+) -> None:
+    """The robocopy preflight must never create or write to the destination."""
+    monkeypatch.setattr(PathValidationService, "_safe_is_dir", staticmethod(lambda path: True))
+    monkeypatch.setattr(
+        path_validation_module.os,
+        "makedirs",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("mkdir must not run")),
+    )
+    monkeypatch.setattr(
+        PathValidationService,
+        "ensure_destination_writable",
+        staticmethod(lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("write probe must not run"))),
+    )
+
+    valid, message = PathValidationService.validate_robocopy_destination(r"Z:\cctv", "network")
+
+    assert valid is True
+    assert message == r"Robocopy destination preflight passed: Z:\cctv"
+
+
+def test_robocopy_destination_preflight_reports_inaccessible_mapped_drive(monkeypatch) -> None:
+    monkeypatch.setattr(PathValidationService, "_safe_is_dir", staticmethod(lambda path: False))
+    monkeypatch.setattr(
+        PathValidationService,
+        "is_running_under_scheduler_or_service",
+        staticmethod(lambda: False),
+    )
+
+    valid, message = PathValidationService.validate_robocopy_destination(r"Z:\cctv", "network")
+
+    assert valid is False
+    assert message == "Mapped network drive Z: is not accessible to this process."
+
+
+def test_robocopy_destination_preflight_appends_unc_guidance_for_scheduler_runs(monkeypatch) -> None:
+    monkeypatch.setattr(PathValidationService, "_safe_is_dir", staticmethod(lambda path: False))
+    monkeypatch.setattr(
+        PathValidationService,
+        "is_running_under_scheduler_or_service",
+        staticmethod(lambda: True),
+    )
+
+    valid, message = PathValidationService.validate_robocopy_destination(r"Z:\cctv", "network")
+
+    assert valid is False
+    assert message.startswith("Mapped network drive Z: is not accessible to this process.")
+    assert "Mapped drives may not be available to Windows Task Scheduler or service accounts." in message
+    assert r"Prefer a UNC destination such as \\server\share\folder." in message
+
+
+def test_scheduler_context_detected_from_cli_and_environment(monkeypatch) -> None:
+    monkeypatch.setattr(path_validation_module.sys, "argv", ["app.py", "--scheduler-service"])
+    assert PathValidationService.is_running_under_scheduler_or_service() is True
+
+    monkeypatch.setattr(path_validation_module.sys, "argv", ["app.py"])
+    monkeypatch.delenv("SESSIONNAME", raising=False)
+    monkeypatch.delenv("BACKUP_MANAGER_SCHEDULER_MODE", raising=False)
+    assert PathValidationService.is_running_under_scheduler_or_service() is False
+
+    monkeypatch.setenv("SESSIONNAME", "Services-0")
+    assert PathValidationService.is_running_under_scheduler_or_service() is True
+
+    monkeypatch.setenv("SESSIONNAME", "Console")
+    monkeypatch.setenv("BACKUP_MANAGER_SCHEDULER_MODE", "true")
+    assert PathValidationService.is_running_under_scheduler_or_service() is True

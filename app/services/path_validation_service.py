@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import traceback
 from pathlib import Path
 from uuid import uuid4
@@ -27,6 +28,44 @@ class PathValidationService:
         """Return whether the path resembles a mounted Linux share location."""
         cleaned = path.strip()
         return cleaned.startswith("/mnt/") or cleaned.startswith("/media/")
+
+    @staticmethod
+    def get_windows_drive_root(path: str) -> str:
+        """Return the drive root for a mapped-drive path.
+
+        ``Z:\\cctv`` -> ``Z:\\`` and ``Z:\\backup\\folder`` -> ``Z:\\``.
+        Returns an empty string when the path is not drive-letter based.
+        """
+        cleaned = path.strip()
+        match = re.match(r"^([A-Za-z]:)(?:[\\/].*)?$", cleaned)
+        if not match:
+            return ""
+        return f"{match.group(1)}\\"
+
+    @staticmethod
+    def is_running_under_scheduler_or_service() -> bool:
+        """Return whether this process looks like a scheduler/service run."""
+        if "--scheduler-service" in sys.argv:
+            return True
+        if os.environ.get("BACKUP_MANAGER_SCHEDULER_MODE", "").strip().lower() in {"1", "true", "yes"}:
+            return True
+        session_name = os.environ.get("SESSIONNAME", "").strip()
+        # Interactive logons report SESSIONNAME=Console; services report e.g. Services-0.
+        if session_name and not session_name.lower().startswith("console"):
+            return True
+        return False
+
+    @classmethod
+    def mapped_drive_not_accessible_message(cls, drive_root: str) -> str:
+        """Build the user-facing error for an unreachable mapped drive root."""
+        drive = drive_root.rstrip("\\/") or drive_root
+        message = f"Mapped network drive {drive} is not accessible to this process."
+        if cls.is_running_under_scheduler_or_service():
+            message += (
+                " Mapped drives may not be available to Windows Task Scheduler or service accounts."
+                r" Prefer a UNC destination such as \\server\share\folder."
+            )
+        return message
 
     @staticmethod
     def _bool_text(value: bool) -> str:
@@ -168,6 +207,29 @@ class PathValidationService:
                 ),
             )
         return cls.ensure_destination_writable(cleaned, destination_type=destination_type)
+
+    @classmethod
+    def validate_robocopy_destination(cls, path: str, destination_type: str) -> tuple[bool, str]:
+        """Run the lightweight preflight for a robocopy destination.
+
+        Robocopy owns destination creation and copying, so this path deliberately
+        performs no ``mkdir``, no temp file, and no write probe. Only required
+        input, destination syntax, and mapped-drive root visibility are checked.
+        """
+        cleaned = path.strip()
+        if not cleaned:
+            return False, "Destination folder is required."
+        if destination_type not in {"local", "network"}:
+            return False, f"Unsupported destination type: {destination_type}"
+        if destination_type == "network" and cleaned.startswith("//"):
+            return False, (
+                "Invalid Windows network path '//server/share'. "
+                r"Use a UNC path like '\\server\share\folder'."
+            )
+        drive_root = cls.get_windows_drive_root(cleaned)
+        if drive_root and not cls._safe_is_dir(drive_root):
+            return False, cls.mapped_drive_not_accessible_message(drive_root)
+        return True, f"Robocopy destination preflight passed: {cleaned}"
 
     @classmethod
     def ensure_destination_writable(

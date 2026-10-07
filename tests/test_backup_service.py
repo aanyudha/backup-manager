@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.models.backup_metadata import BackupMetadata
-from app.models.profile import MySQLBackupProfile
+from app.models.profile import FolderBackupProfile, MySQLBackupProfile
 from app.models.result import BackupResult
 from app.repositories.backup_metadata_repository import BackupMetadataRepository
 from app.repositories.profile_repository import ProfileRepository
@@ -27,6 +27,26 @@ class StubMySQLEngine:
         if progress:
             progress("engine finished")
         return self.result
+
+
+class StubFolderEngine:
+    """Return a prebuilt folder result and engine resolution."""
+
+    def __init__(self, result: BackupResult, resolved_engine: str) -> None:
+        self.result = result
+        self.resolved_engine = resolved_engine
+        self.run_count = 0
+        self.resolve_count = 0
+
+    def run(self, profile: FolderBackupProfile, progress=None) -> BackupResult:  # type: ignore[no-untyped-def]
+        self.run_count += 1
+        if progress:
+            progress("folder engine finished")
+        return self.result
+
+    def resolve_engine(self, profile: FolderBackupProfile) -> str:
+        self.resolve_count += 1
+        return self.resolved_engine
 
 
 class StubVerificationService:
@@ -358,3 +378,111 @@ def test_retention_warning_on_network_destination_stays_successful(tmp_path: Pat
     assert final_result.success is True
     assert "retention step:" in final_result.message
     assert "Retention warning:" in log_text
+
+
+def build_folder_profile(tmp_path: Path, *, engine: str, destination: str) -> FolderBackupProfile:
+    """Create a folder profile for backup service tests."""
+    source_dir = tmp_path / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    return FolderBackupProfile(
+        name="cctv",
+        source=str(source_dir),
+        destination=destination,
+        destination_type="network",
+        engine=engine,
+        mode="copy_new_changed",
+    )
+
+
+def build_folder_result(profile: FolderBackupProfile, tmp_path: Path) -> BackupResult:
+    """Create the result a successful robocopy run returns."""
+    started_at = datetime.now(timezone.utc)
+    return BackupResult(
+        success=True,
+        backup_type="folder",
+        profile_id=profile.id,
+        profile_name=profile.name,
+        started_at=started_at,
+        finished_at=started_at + timedelta(seconds=1),
+        exit_code=1,
+        message="Robocopy exit code: 1\nBackup completed successfully.",
+        log_file=str(tmp_path / "logs" / "folder_backup.log"),
+        output_file=profile.destination,
+    )
+
+
+def fail_destination_stat(destination: str, monkeypatch) -> None:
+    """Make Python stat calls on the destination raise a WinError 59 style error."""
+    original_exists = Path.exists
+
+    def fake_exists(self: Path) -> bool:
+        if str(self) == destination:
+            raise OSError(59, "An unexpected network error occurred", destination)
+        return original_exists(self)
+
+    monkeypatch.setattr(Path, "exists", fake_exists)
+
+
+def test_successful_robocopy_folder_backup_skips_destination_probe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A successful robocopy run must not add WinError 59 verification noise."""
+    repository = ProfileRepository(tmp_path / "config")
+    metadata_repository = BackupMetadataRepository(tmp_path / "config")
+    log_service = LogService(tmp_path / "logs")
+    destination = r"Z:\cctv"
+    profile = build_folder_profile(tmp_path, engine="robocopy", destination=destination)
+    repository.create(profile)
+    result = build_folder_result(profile, tmp_path)
+    Path(result.log_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(result.log_file).write_text("", encoding="utf-8")
+    folder_engine = StubFolderEngine(result, "robocopy")
+    fail_destination_stat(destination, monkeypatch)
+
+    service = BackupService(
+        repository,
+        PlatformService(),
+        log_service,
+        metadata_repository=metadata_repository,
+        folder_engine=folder_engine,
+    )
+
+    final_result = service.run_profile(profile.id)
+
+    assert final_result.success is True
+    assert final_result.message == "Robocopy exit code: 1\nBackup completed successfully."
+    assert "verification step" not in final_result.message
+    assert "OSError" not in final_result.message
+    assert metadata_repository.list() == []
+
+
+def test_local_copy_folder_backup_still_runs_destination_probe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """local_copy keeps the strict Python destination probe."""
+    repository = ProfileRepository(tmp_path / "config")
+    metadata_repository = BackupMetadataRepository(tmp_path / "config")
+    log_service = LogService(tmp_path / "logs")
+    destination = str(tmp_path / "destination")
+    profile = build_folder_profile(tmp_path, engine="local_copy", destination=destination)
+    repository.create(profile)
+    result = build_folder_result(profile, tmp_path)
+    Path(result.log_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(result.log_file).write_text("", encoding="utf-8")
+    folder_engine = StubFolderEngine(result, "local_copy")
+    fail_destination_stat(destination, monkeypatch)
+
+    service = BackupService(
+        repository,
+        PlatformService(),
+        log_service,
+        metadata_repository=metadata_repository,
+        folder_engine=folder_engine,
+    )
+
+    final_result = service.run_profile(profile.id)
+
+    assert final_result.success is True
+    assert "verification step: OSError" in final_result.message
